@@ -7,6 +7,9 @@ import { extractChunks as extractPdf } from './pdf/extractor';
 import { extractChunks as extractEpub } from './epub/extractor';
 import { generateCards, CardTypes } from './cards/generator';
 import { generateMockCards } from './cards/mockGenerator';
+import { generateReadingMockCards } from './cards/readingMockGenerator';
+import { exportReadingToCsv } from './csv/readingExporter';
+import { exportReadingToHtml } from './html/readingExporter';
 import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards/offlineGenerator';
 import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
@@ -39,6 +42,7 @@ program
   .option('--deepl', '使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）')
   .option('--split-chapters', '將 CSV 依章節分割輸出（mock 模式）')
   .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
+  .option('--reading', '讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -50,6 +54,7 @@ program
     deepl?: boolean;
     splitChapters?: boolean;
     splitSize?: string;
+    reading?: boolean;
   }) => {
     const needsApiKey = !options.mock && !options.offline && !options.deepl;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
@@ -167,6 +172,36 @@ program
         process.exit(0);
       }
       console.log('');
+    }
+
+    // ── Reading 模式（讀書理解導向） ───────────────────────────────────────────
+    if (options.reading) {
+      if (options.mock) {
+        console.log(chalk.yellow('正在分析書籍內容（讀書理解模式）...'));
+        const readingCards = generateReadingMockCards(enrichedChunks);
+        const total = readingCards.terms.length + readingCards.causes.length +
+          readingCards.chapters.length + readingCards.themes.length;
+        console.log('');
+        console.log(chalk.cyan('讀書理解字卡統計：'));
+        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
+        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
+        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
+        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
+        console.log(chalk.bold(`  合計：       ${total} 張`));
+        console.log('');
+        console.log(chalk.yellow('正在匯出檔案...'));
+        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
+        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      } else {
+        console.log(chalk.red('錯誤：--reading 目前僅支援 --mock 模式，Claude API / Offline 版本開發中。'));
+        process.exit(1);
+      }
+      console.log('');
+      console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
+      return;
     }
 
     const allCards: GeneratedCards = { vocab: [], cloze: [], character: [], plot: [] };

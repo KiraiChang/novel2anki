@@ -18,6 +18,26 @@
 
 ---
 
+### [STEP-005] 讀書導向字卡模式（`--reading`）
+**狀態**：進行中
+**目標**：新增 `--reading` 旗標，產出以「讀懂本書」為目標的字卡（術語、因果、章節理解、主題意象），支援 `--mock`、Claude API、`--offline` 三種處理方式，現有流程不受影響。
+
+1. [x] 建立 `src/cards/readingTypes.ts`（`ReadingCards` 型別 + 四種子卡片介面）
+2. [x] 建立 `src/cards/readingMockGenerator.ts`（兩階段分析：全局統計 → 卡片生成）
+3. [x] 修改 `src/index.ts`（新增 `--reading` 旗標 + 路由至 reading 生成器）
+4. [x] 建立 `src/csv/readingExporter.ts`（`ReadingCards` CSV 匯出 + ai_hint）
+5. [x] 建立 `src/html/readingExporter.ts`（reading 卡片 HTML，四區塊互動）
+6. [ ] 建立 `src/cards/readingGenerator.ts`（Claude API reading prompts）
+7. [ ] 建立 `src/cards/readingOfflineGenerator.ts`（Ollama reading prompts）
+
+**備注**：
+- Reading 卡片複用 `VocabCard`/`PlotCard`/`CharacterCard` 型別，不動 APKG/CSV 匯出管線骨架
+- Mock 層需兩階段：第一階段跨 chunk 全局統計（詞頻、因果句、首尾句），第二階段排序生成
+- `--reading` 與 `--mock/--offline` 正交，與現有 `--types` 互相獨立
+- HTML 區塊標題改為「術語」「因果事件」「章節脈絡」「主題意象」
+
+---
+
 ### [STEP-004] DeepL 翻譯模式 + 比對功能 + 成本預估
 **狀態**：已完成
 **目標**：新增 `--deepl` 旗標，以 DeepL API 取代 LLM 翻譯定義；搭配 Claude/Ollama 時自動產生上下堆疊比對 HTML；執行前顯示字元/token 成本預估並請使用者確認。
