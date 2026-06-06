@@ -98,6 +98,12 @@ export function resolveCsvPaths(input: string): string[] {
   return [input];
 }
 
+function scoreMention(mention: string): number {
+  const contentWords = (mention.match(/\b[a-zA-Z]{4,}\b/g) ?? []).length;
+  const hasRelativeClause = /\b(who|which|whose)\b/i.test(mention);
+  return contentWords + (hasRelativeClause ? 5 : 0);
+}
+
 export function importFromCsvFiles(paths: string[]): GeneratedCards {
   const merged: GeneratedCards = { vocab: [], cloze: [], character: [], plot: [] };
   for (const p of paths) {
@@ -107,5 +113,16 @@ export function importFromCsvFiles(paths: string[]): GeneratedCards {
     merged.character.push(...cards.character);
     merged.plot.push(...cards.plot);
   }
+
+  // 跨檔案依 name 去重，保留 firstMention 分數最高的那張
+  const charMap = new Map<string, GeneratedCards['character'][number]>();
+  for (const c of merged.character) {
+    const existing = charMap.get(c.name);
+    if (!existing || scoreMention(c.firstMention) > scoreMention(existing.firstMention)) {
+      charMap.set(c.name, c);
+    }
+  }
+  merged.character = [...charMap.values()];
+
   return merged;
 }

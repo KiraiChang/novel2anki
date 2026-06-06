@@ -52,17 +52,27 @@ function extractLongWords(text: string): string[] {
   return unique.slice(0, 10);
 }
 
-// 常見功能詞：即使出現在句子中間也不是專有名詞
+// 常見功能詞與非專有名詞：即使出現在句子中間也不是角色名
 const FUNCTION_WORDS = new Set([
+  // 代名詞 / 限定詞
   'The','This','That','These','Those',
   'He','She','It','They','We','You','I',
   'His','Her','Its','Their','Our','Your','My',
+  // 連接詞 / 介系詞
   'But','And','Or','Yet','So','For','Nor',
   'With','From','Into','Upon','Unto','Over','Under','After','Before',
+  // 副詞 / 助動詞
   'Then','Now','Still','Just','Even','Only','Also','Soon','Here','There',
   'Had','Was','Were','Has','Have','Did','Does','Not',
+  // 疑問詞 / 量詞
   'What','When','Where','Who','Which','How','Why',
   'All','Any','Some','Such','Each','Every','Both',
+  // 感歎詞 / 對話用語（句中大寫易誤判）
+  'End','Aye','Nay','Alas','Indeed','Well',
+  // 宗教 / 通用稱謂（非特定角色）
+  'God','Gods','Lord','Lady','Sir','Master','Mistress',
+  // 抽象名詞（常在奇幻文中大寫）
+  'Good','Evil','Dark','True','False','Light','Shadow',
 ]);
 
 export function extractCapitalizedNames(text: string): string[] {
