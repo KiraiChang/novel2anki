@@ -31,6 +31,8 @@ npx ts-node src/index.ts <檔案> [選項]
   -c, --chunks <數量>  最多處理幾個段落區塊（預設：全部）
   -o, --output <目錄>  .apkg 輸出目錄（預設：./output）
   --mock               模擬模式：不呼叫 API，用文字分析產生測試字卡
+  --offline            離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）
+  --model <模型名稱>   指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL）
 ```
 
 ## 使用範例
@@ -44,6 +46,12 @@ npx ts-node src/index.ts novel.pdf --deck "Pride and Prejudice" --chunks 5
 
 # Mock 模式測試，不花 API 費用
 npx ts-node src/index.ts novel.epub --mock
+
+# 離線模式（需先執行 ollama serve 並 ollama pull llama3.2）
+npx ts-node src/index.ts novel.epub --offline --chunks 3
+
+# 離線模式，自訂模型
+npx ts-node src/index.ts novel.epub --offline --model gemma3 --chunks 3
 ```
 
 ## 字卡類型

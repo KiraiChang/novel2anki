@@ -3,7 +3,7 @@
 ## 概覽
 
 從英文 PDF / EPUB 小說自動產生 Anki 字卡的 CLI 工具。  
-使用 Claude API（工具呼叫模式）產生結構化字卡，輸出為 `.apkg` 格式。
+支援三種生成模式：Claude API（雲端）、Ollama（本地離線）、Mock（規則式測試）。
 
 ## 資料流
 
@@ -16,13 +16,15 @@ CLI 輸入
                    ▼
            逐 Chunk 處理
                    │
-         ┌─────────┴─────────┐
-       --mock              API 模式
-         │                   │
-  mockGenerator.ts     generator.ts
-  （規則式提取）        （Claude 工具呼叫，4 類並行）
-         │                   │
-         └─────────┬─────────┘
+       ┌───────────┼───────────┐
+     --mock     --offline    API 模式（預設）
+       │            │            │
+mockGenerator  offlineGenerator  generator.ts
+（規則式）     （Ollama fetch，  （Claude 工具呼叫，
+               循序 4 類）       4 類並行）
+       │            │            │
+       └────────────┴────────────┘
+                   │
                    ▼
            GeneratedCards 合併
                    │
@@ -49,6 +51,7 @@ CLI 輸入
 | EPUB 提取 | `src/epub/extractor.ts` | epub2 → stripHtml → 分割 → Chunk[] |
 | 型別定義 | `src/cards/types.ts` | Chunk、*Card、GeneratedCards 介面 |
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
+| 離線生成 | `src/cards/offlineGenerator.ts` | Ollama fetch（循序），零新套件 → 詳見 [offline/ARCHITECTURE.md](offline/ARCHITECTURE.md) |
 | Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API → 詳見 [mock/ARCHITECTURE.md](mock/ARCHITECTURE.md) |
 | 卡片模板 | `src/cards/templates.ts` | Anki HTML/CSS 模板常數 |
 | Anki 匯出器 | `src/anki/exporter.ts` | SQLite 建構、ZIP 打包、.apkg 輸出 |
@@ -78,7 +81,7 @@ type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot'
 
 | 套件 | 用途 |
 |------|------|
-| `@anthropic-ai/sdk` | Claude API 官方 SDK |
+| `@anthropic-ai/sdk` | Claude API 官方 SDK（`--offline` 與 `--mock` 模式不需要） |
 | `better-sqlite3` | 建構 Anki SQLite 資料庫 |
 | `jszip` | 打包 `.apkg`（ZIP 容器） |
 | `pdf-parse` | PDF 文字提取 |
@@ -86,3 +89,4 @@ type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot'
 | `commander` | CLI 參數解析 |
 | `chalk` | 終端彩色輸出 |
 | `dotenv` | 載入 `.env` 環境變數 |
+| `fetch()` | Node 18+ 內建，`offlineGenerator.ts` 呼叫 Ollama REST API（不引入新套件） |

@@ -18,6 +18,21 @@
 
 ---
 
+### [STEP-002] 離線模式（Ollama 整合）
+**狀態**：已完成
+**目標**：新增 `--offline` 旗標，透過本機 Ollama LLM 產生字卡，不需網路或 API Key；模型名稱可透過 `--model` 或 `OLLAMA_MODEL` 環境變數自訂。
+
+1. 建立 `src/cards/offlineGenerator.ts`（OllamaConfig、callOllama、4 種生成函式、匯出 generateCards）
+2. 修改 `src/index.ts`（新增 `--offline`、`--model` 選項，三叉路由邏輯）
+3. 新增 `.env.example` 的 Ollama 設定項目
+4. 補寫 BDD 測試案例（單元 + 端對端）
+5. 新建 `docs/offline/` 子目錄文件
+6. 更新 `docs/ARCHITECTURE.md`、`docs/NOTES.md`、`docs/TODOS.md`、`CLAUDE.md`
+
+**備注**：使用 Node 18+ 內建 `fetch()`，零新套件。Ollama 呼叫改用循序而非並行（本地模型無法真正並行推理）。
+
+---
+
 ### [STEP-001] 專案初始化
 **狀態**：已完成
 

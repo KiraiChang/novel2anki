@@ -6,6 +6,7 @@ import { extractChunks as extractPdf } from './pdf/extractor';
 import { extractChunks as extractEpub } from './epub/extractor';
 import { generateCards, CardTypes } from './cards/generator';
 import { generateMockCards } from './cards/mockGenerator';
+import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards/offlineGenerator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml } from './html/exporter';
 import { GeneratedCards } from './cards/types';
@@ -24,15 +25,20 @@ program
   .option('-c, --chunks <數量>', '最多處理幾個區塊（預設：全部）')
   .option('-o, --output <目錄>', '輸出目錄', './output')
   .option('--mock', '模擬模式：不呼叫 API，用簡單文字分析產生測試字卡')
+  .option('--offline', '離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）')
+  .option('--model <模型名稱>', '指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL 環境變數）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf or epub)
     deck?: string;
     types: string;
     chunks?: string;
     output: string;
     mock?: boolean;
+    offline?: boolean;
+    model?: string;
   }) => {
-    if (!options.mock && !process.env.ANTHROPIC_API_KEY) {
-      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock 旗標以不使用 API'));
+    const needsApiKey = !options.mock && !options.offline;
+    if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
+      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline 旗標以不使用 API'));
       process.exit(1);
     }
 
@@ -46,8 +52,11 @@ program
     const deckName = options.deck ?? path.basename(pdfFile, path.extname(pdfFile));
     const maxChunks = options.chunks ? parseInt(options.chunks, 10) : Infinity;
 
+    const ollamaConfig = options.offline ? loadOllamaConfig(options.model) : null;
+
     console.log(chalk.cyan(`\n📖 PDF 小說 → Anki 字卡產生器`));
     if (options.mock) console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
+    if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
     console.log('');
@@ -76,7 +85,9 @@ program
       try {
         const cards = options.mock
           ? generateMockCards(chunk, requestedTypes)
-          : await generateCards(chunk, requestedTypes);
+          : options.offline
+            ? await generateOfflineCards(chunk, requestedTypes, ollamaConfig!)
+            : await generateCards(chunk, requestedTypes);
 
         allCards.vocab.push(...cards.vocab);
         allCards.cloze.push(...cards.cloze);
