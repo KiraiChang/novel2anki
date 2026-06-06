@@ -80,16 +80,15 @@ function mockVocab(chunk: EnrichedChunk): VocabCard[] {
 
 function mockCloze(chunk: EnrichedChunk): ClozeCard[] {
   const sentences = extractSentences(chunk.text).slice(0, 2);
-  return sentences.map(sentence => {
+  return sentences.flatMap(sentence => {
     const words = sentence.split(' ').filter(w => w.length >= 5);
-    const target = words[Math.floor(words.length / 2)] ?? words[0] ?? 'word';
+    const target = words[Math.floor(words.length / 2)] ?? words[0] ?? '';
     const clean = target.replace(/[^a-zA-Z]/g, '');
-    const cloze = sentence.replace(clean, `{{c1::${clean}}}`);
-    return {
-      type: 'cloze' as const,
-      text: cloze,
-      hint_zh: '',
-    };
+    if (!clean) return [];
+    // 用 target（原始形式，含 apostrophe）搜尋，clean（純字母）作為填空詞
+    const cloze = sentence.replace(target, `{{c1::${clean}}}`);
+    if (cloze === sentence) return []; // replace 未命中，略過此句
+    return [{ type: 'cloze' as const, text: cloze, hint_zh: '' }];
   });
 }
 
