@@ -12,8 +12,9 @@ import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToComparisonHtml } from './html/exporter';
-import { exportToCsv } from './csv/exporter';
-import { importFromCsv } from './csv/importer';
+import { exportToCsv, exportToCsvSplits, ChunkResult } from './csv/exporter';
+import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
+import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
 import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
@@ -36,7 +37,9 @@ program
   .option('--offline', '離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）')
   .option('--model <模型名稱>', '指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL 環境變數）')
   .option('--deepl', '使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）')
-  .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf or epub)
+  .option('--split-chapters', '將 CSV 依章節分割輸出（mock 模式）')
+  .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
+  .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
     chunks?: string;
@@ -45,6 +48,8 @@ program
     offline?: boolean;
     model?: string;
     deepl?: boolean;
+    splitChapters?: boolean;
+    splitSize?: string;
   }) => {
     const needsApiKey = !options.mock && !options.offline && !options.deepl;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
@@ -77,17 +82,19 @@ program
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
     console.log('');
 
+    const isDirectory = (() => { try { return fs.statSync(pdfFile).isDirectory(); } catch { return false; } })();
     const ext = path.extname(pdfFile).toLowerCase();
-    const supportedExts = ['.pdf', '.epub', '.csv'];
-    if (!supportedExts.includes(ext)) {
-      console.error(chalk.red(`錯誤：不支援的檔案格式「${ext}」，目前支援：pdf、epub、csv`));
-      process.exit(1);
-    }
 
-    // CSV 輸入模式：直接解析 CSV 並匯出，跳過提取與生成步驟
-    if (ext === '.csv') {
-      console.log(chalk.yellow(`正在讀取 CSV...`));
-      const csvCards = importFromCsv(pdfFile);
+    // CSV / 目錄輸入模式：解析後直接匯出，跳過提取與生成步驟
+    if (isDirectory || ext === '.csv') {
+      const csvPaths = resolveCsvPaths(pdfFile);
+      if (csvPaths.length === 0) {
+        console.error(chalk.red('錯誤：找不到任何 CSV 檔案。'));
+        process.exit(1);
+      }
+      console.log(chalk.yellow(`正在讀取 ${csvPaths.length} 個 CSV...`));
+      csvPaths.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
+      const csvCards = importFromCsvFiles(csvPaths);
       const total = csvCards.vocab.length + csvCards.cloze.length + csvCards.character.length + csvCards.plot.length;
       console.log(chalk.green(`✓ 共讀取 ${total} 張卡片（詞彙 ${csvCards.vocab.length}、克漏字 ${csvCards.cloze.length}、人物 ${csvCards.character.length}、情節 ${csvCards.plot.length}）`));
       if (total === 0) {
@@ -104,6 +111,12 @@ program
       console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
       console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
       return;
+    }
+
+    const supportedExts = ['.pdf', '.epub'];
+    if (!supportedExts.includes(ext)) {
+      console.error(chalk.red(`錯誤：不支援的檔案格式「${ext}」，目前支援：pdf、epub、csv、目錄`));
+      process.exit(1);
     }
 
     console.log(chalk.yellow(`正在讀取 ${ext.slice(1).toUpperCase()}...`));
@@ -158,6 +171,7 @@ program
 
     const allCards: GeneratedCards = { vocab: [], cloze: [], character: [], plot: [] };
     const compareCards: GeneratedCards = { vocab: [], cloze: [], character: [], plot: [] };
+    const chunkResults: ChunkResult[] = [];
 
     for (let i = 0; i < enrichedChunks.length; i++) {
       const chunk = enrichedChunks[i];
@@ -178,6 +192,7 @@ program
         allCards.cloze.push(...cards.cloze);
         allCards.character.push(...cards.character);
         allCards.plot.push(...cards.plot);
+        chunkResults.push({ chunk, cards });
 
         // 比對模式：同時跑 Claude API 或 Ollama
         if (isCompare) {
@@ -225,9 +240,18 @@ program
     console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
 
     if (options.mock) {
-      const csvPath = exportToCsv(allCards, deckName, options.output);
-      console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
-      console.log(chalk.gray(`  (可編輯後執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      if (options.splitChapters || options.splitSize) {
+        const splitBy = options.splitChapters ? 'chapter' : 'size';
+        const splitSize = options.splitSize ? parseInt(options.splitSize, 10) : 10;
+        const csvPaths = exportToCsvSplits(chunkResults, deckName, options.output, splitBy, splitSize);
+        console.log(chalk.green(`✓ CSV 分割：   ${csvPaths.length} 個檔案`));
+        csvPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${options.output} -d "${deckName}")`));
+      } else {
+        const csvPath = exportToCsv(allCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+        console.log(chalk.gray(`  (可編輯後執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      }
     }
 
     if (isCompare) {
