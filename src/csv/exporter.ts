@@ -116,12 +116,16 @@ export function exportToCsvSplits(
       if (!seen.has(key)) { seen.set(key, []); order.push(key); }
       seen.get(key)!.push(r);
     }
-    for (const key of order) {
-      groups.push({ name: `${deckName}-ch-${key}`, results: seen.get(key)! });
-    }
+    const chDigits = Math.max(2, String(order.length).length);
+    order.forEach((key, i) => {
+      const seq = String(i + 1).padStart(chDigits, '0');
+      groups.push({ name: `${deckName}-ch-${seq}-${key}`, results: seen.get(key)! });
+    });
   } else {
+    const totalParts = Math.ceil(results.length / splitSize);
+    const partDigits = Math.max(2, String(totalParts).length);
     for (let i = 0; i < results.length; i += splitSize) {
-      const partNum = String(Math.floor(i / splitSize) + 1).padStart(2, '0');
+      const partNum = String(Math.floor(i / splitSize) + 1).padStart(partDigits, '0');
       groups.push({ name: `${deckName}-part-${partNum}`, results: results.slice(i, i + splitSize) });
     }
   }
