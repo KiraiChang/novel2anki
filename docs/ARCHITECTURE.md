@@ -27,11 +27,17 @@ CLI 輸入
            GeneratedCards 合併
                    │
                    ▼
-        src/anki/exporter.ts
-        （SQLite → ZIP → .apkg）
+        ┌──────────────────────────────┐
+        │  src/anki/exporter.ts        │
+        │  （SQLite → ZIP → .apkg）    │
+        ├──────────────────────────────┤
+        │  src/html/exporter.ts        │
+        │  （GeneratedCards → .html）  │
+        └──────────────────────────────┘
                    │
                    ▼
            ./output/{deckName}.apkg
+           ./output/{deckName}.html
 ```
 
 ## 模組職責
@@ -45,7 +51,8 @@ CLI 輸入
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
 | Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API |
 | 卡片模板 | `src/cards/templates.ts` | Anki HTML/CSS 模板常數 |
-| 匯出器 | `src/anki/exporter.ts` | SQLite 建構、ZIP 打包、.apkg 輸出 |
+| Anki 匯出器 | `src/anki/exporter.ts` | SQLite 建構、ZIP 打包、.apkg 輸出 |
+| HTML 匯出器 | `src/html/exporter.ts` | GeneratedCards → 自含式 HTML 預覽頁 |
 
 ## 核心型別
 

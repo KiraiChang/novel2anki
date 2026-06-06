@@ -7,6 +7,7 @@ import { extractChunks as extractEpub } from './epub/extractor';
 import { generateCards, CardTypes } from './cards/generator';
 import { generateMockCards } from './cards/mockGenerator';
 import { exportToApkg } from './anki/exporter';
+import { exportToHtml } from './html/exporter';
 import { GeneratedCards } from './cards/types';
 
 const VALID_TYPES: CardTypes[] = ['vocab', 'cloze', 'character', 'plot'];
@@ -110,11 +111,14 @@ program
       process.exit(1);
     }
 
-    console.log(chalk.yellow('正在匯出 .apkg 檔案...'));
-    const outputPath = await exportToApkg(allCards, deckName, options.output);
-    console.log(chalk.green(`✓ 已儲存至：${outputPath}`));
+    console.log(chalk.yellow('正在匯出檔案...'));
+    const apkgPath = await exportToApkg(allCards, deckName, options.output);
+    const htmlPath = exportToHtml(allCards, deckName, options.output);
+    console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
+    console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
     console.log('');
-    console.log(chalk.cyan('開啟 Anki → 檔案 → 匯入，選取上方檔案即可使用。'));
+    console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
+    console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
   });
 
 program.parse();
