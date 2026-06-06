@@ -16,7 +16,7 @@ import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards
 import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
-import { exportToHtml, exportToComparisonHtml } from './html/exporter';
+import { exportToHtml, exportToFlashHtml, exportToComparisonHtml } from './html/exporter';
 import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv/exporter';
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import * as fs from 'fs';
@@ -45,6 +45,7 @@ program
   .option('--split-chapters', '將 CSV 依章節分割輸出（mock 模式）')
   .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
   .option('--reading', '讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡')
+  .option('--flash', '額外輸出單字卡 HTML（頁籤切換 + 上一張 / 下一張 + 翻面）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -57,6 +58,7 @@ program
     splitChapters?: boolean;
     splitSize?: string;
     reading?: boolean;
+    flash?: boolean;
   }) => {
     const needsApiKey = !options.mock && !options.offline && !options.deepl;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
@@ -114,6 +116,10 @@ program
       const htmlPath = exportToHtml(csvCards, deckName, options.output);
       console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
       console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+      if (options.flash) {
+        const flashPath = exportToFlashHtml(csvCards, deckName, options.output);
+        console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
+      }
       console.log('');
       console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
       console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
@@ -364,6 +370,11 @@ program
         console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
         console.log(chalk.gray(`  (可編輯後執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
       }
+    }
+
+    if (options.flash) {
+      const flashPath = exportToFlashHtml(allCards, deckName, options.output);
+      console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
     }
 
     if (isCompare) {

@@ -11,7 +11,7 @@ cp .env.example .env
 npx ts-node src/index.ts novel.epub --mock --chunks 3
 
 # 3. 正式執行（呼叫 Claude API）
-npx ts-node src/index.ts novel.pdf --chunks 3
+npx ts-node src/index.ts novel.epub --chunks 3
 ```
 
 ## 完整選項
@@ -29,11 +29,13 @@ npx ts-node src/index.ts <輸入> [選項]
   -c, --chunks <數量>     最多處理幾個段落區塊（預設：全部）
   -o, --output <目錄>     輸出目錄（預設：./output）
   --mock                  模擬模式：不呼叫 API，用文字分析產生字卡，並額外輸出 CSV
-  --split-chapters        將 CSV 依章節分割輸出（搭配 --mock）
-  --split-size <數量>     將 CSV 依每 N 個 chunk 分割輸出（搭配 --mock）
   --offline               離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）
   --model <模型名稱>      指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL）
   --deepl                 使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）
+  --split-chapters        將 CSV 依章節分割輸出（搭配 --mock）
+  --split-size <數量>     將 CSV 依每 N 個 chunk 分割輸出（搭配 --mock）
+  --reading               讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡
+  --flash                 額外輸出單字卡 HTML（頁籤切換 + 上一張 / 下一張 + 翻面）
 ```
 
 ## 使用範例
@@ -68,6 +70,25 @@ npx ts-node src/index.ts novel.epub --offline --chunks 3
 
 # 離線模式，自訂模型
 npx ts-node src/index.ts novel.epub --offline --model gemma3 --chunks 3
+
+# DeepL 翻譯模式（需設定 DEEPL_API_KEY）
+npx ts-node src/index.ts novel.epub --deepl --chunks 5
+
+# DeepL + Claude API 比對模式（同時產生比對 HTML）
+npx ts-node src/index.ts novel.epub --deepl --chunks 5
+
+# 讀書理解模式（mock）：產出 CSV + 互動預覽 HTML
+npx ts-node src/index.ts novel.epub --reading --mock --chunks 10
+
+# 讀書理解模式（Claude API）
+npx ts-node src/index.ts novel.epub --reading
+
+# 讀書理解模式（Ollama 離線）
+npx ts-node src/index.ts novel.epub --reading --offline
+
+# 額外輸出單字卡 HTML（可與任何模式並用）
+npx ts-node src/index.ts novel.epub --mock --flash
+npx ts-node src/index.ts output/novel.csv --flash
 ```
 
 ## Mock → CSV → APKG 工作流程
@@ -90,9 +111,9 @@ npx ts-node src/index.ts output/novel.csv -d "Novel"
 ### 分割 CSV 流程（推薦大型書籍）
 
 ```bash
-# 1. 依章節切割
+# 1. 依章節切割（檔名含零補位流水號，確保合併順序正確）
 npx ts-node src/index.ts novel.epub --mock --split-chapters
-# 輸出：output/novel-ch-chapter-1.csv、output/novel-ch-chapter-2.csv ...
+# 輸出：output/novel-ch-01-chapter-1.csv、output/novel-ch-02-chapter-2.csv ...
 
 # 或依 chunk 數切割（每 5 個 chunk 一檔）
 npx ts-node src/index.ts novel.epub --mock --split-size 5
@@ -100,7 +121,7 @@ npx ts-node src/index.ts novel.epub --mock --split-size 5
 
 # 2. 逐一對每個 CSV 用 AI 填入空白欄
 
-# 3. 整目錄一次合併打包
+# 3. 整目錄一次合併打包（自動依流水號排序合併）
 npx ts-node src/index.ts output/ -d "Novel"
 ```
 
@@ -128,7 +149,7 @@ npx ts-node src/index.ts output/ -d "Novel"
 | vocab | 繁體中文定義，限 25 字，選最符合例句語意的詞性 |
 | cloze | 繁體中文提示說明，限 15 字，說明填空語意角色 |
 | character | 2–3 句繁體中文描述；無法判斷時回傳「（原文中為地名／概念）」 |
-| plot | 繁體中文摘要，限 60 字，並將 answer_zh 原文替換為摘要 |
+| plot | 繁體中文摘要，空一行後附上英文原文（中英對照格式） |
 
 ## 字卡類型
 
@@ -138,6 +159,54 @@ npx ts-node src/index.ts output/ -d "Novel"
 | `cloze` | 關鍵片語挖空填充 | Cloze |
 | `character` | 人物／地點／概念介紹 | Basic |
 | `plot` | 情節理解問答（正反兩面） | Basic + Reversed |
+
+## 讀書理解模式（`--reading`）
+
+以「讀懂整本書」為目標產生四種字卡，獨立於一般字卡流程。
+
+| 字卡類型 | 說明 |
+|----------|------|
+| `reading-term` | 書中高頻術語或世界觀專有名詞（出現 ≥2 次） |
+| `reading-cause` | 含因果標記的關鍵轉折句（because / since / therefore 等） |
+| `reading-chapter` | 每章首尾句，輔助理解章節核心事件 |
+| `reading-theme` | 全書反覆出現的意象詞（出現 ≥3 次） |
+
+產出兩個檔案：
+- `{deck}-reading.csv`：含 `ai_hint` 提示詞，可用 AI 補全中文說明
+- `{deck}-reading.html`：互動預覽，四個色塊區域，點擊翻面
+
+```bash
+# Mock 模式（不呼叫 API，快速預覽）
+npx ts-node src/index.ts novel.epub --reading --mock
+
+# Claude API 模式（兩階段：Mock 結構分析 → Claude 補充中文）
+npx ts-node src/index.ts novel.epub --reading
+
+# Ollama 離線模式
+npx ts-node src/index.ts novel.epub --reading --offline
+```
+
+## 單字卡 HTML（`--flash`）
+
+可附加於任何執行模式，額外產出 `{deck}-flash.html`。
+
+### 頁面功能
+
+| 操作 | 方式 |
+|------|------|
+| 切換類型 | 頁籤（詞彙 / 克漏字 / 人物 / 情節），顯示各類型張數 |
+| 翻面 | 點擊卡片、翻面按鈕、空白鍵、Enter |
+| 換頁 | 上一張 / 下一張按鈕，或鍵盤 ← → |
+| 進度 | 顯示「目前張 / 總張數」 |
+
+### 正反面內容對應
+
+| 類型 | 正面 | 背面 |
+|------|------|------|
+| vocab | 單字 ＋ 例句 | 繁體中文定義 |
+| cloze | 挖空句（`___`） | 提示 ＋ 含答案原句（`【word】`）|
+| character | 人名 ＋ 首次出現原句 | 繁體中文描述 |
+| plot | 中文問題 | 答案 |
 
 ## 匯入 Anki
 

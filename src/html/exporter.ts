@@ -301,6 +301,265 @@ export function exportToComparisonHtml(
   return outputPath;
 }
 
+// ── Flash 單字卡模式 ─────────────────────────────────────────────────────────
+
+interface FlashCard {
+  primary: string;   // 大字（單字 / 人名 / 問題 / 克漏字句）
+  secondary: string; // 小字（例句 / firstMention / ''）
+  answer: string;    // 翻面後的答案
+}
+
+interface FlashDeck {
+  vocab: FlashCard[];
+  cloze: FlashCard[];
+  character: FlashCard[];
+  plot: FlashCard[];
+}
+
+function buildFlashDeck(cards: GeneratedCards): FlashDeck {
+  return {
+    vocab: cards.vocab.map(c => ({
+      primary: c.word,
+      secondary: c.exampleFromText,
+      answer: c.definition_zh || '（尚未填入定義）',
+    })),
+    cloze: cards.cloze.map(c => ({
+      primary: c.text.replace(/\{\{c\d+::([^}]+)\}\}/g, '___'),
+      secondary: '',
+      answer: (c.hint_zh ? '提示：' + c.hint_zh + '\n\n' : '') +
+               c.text.replace(/\{\{c\d+::([^}]+)\}\}/g, '【$1】'),
+    })),
+    character: cards.character.map(c => ({
+      primary: c.name,
+      secondary: c.firstMention,
+      answer: c.description_zh || '（尚未填入描述）',
+    })),
+    plot: cards.plot.map(c => ({
+      primary: c.question_zh,
+      secondary: '',
+      answer: c.answer_zh,
+    })),
+  };
+}
+
+const FLASH_TAB_COLORS: Record<string, string> = {
+  vocab: '#3498db', cloze: '#27ae60', character: '#9b59b6', plot: '#e67e22',
+};
+
+const FLASH_TAB_LABELS: Record<string, string> = {
+  vocab: '📚 詞彙', cloze: '✏️ 克漏字', character: '🧑 人物', plot: '📖 情節',
+};
+
+const FLASH_CSS = `
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --accent: #3498db; }
+html, body { height: 100%; }
+body {
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  background: #f0f4f8; color: #2c3e50;
+  display: flex; flex-direction: column;
+}
+header {
+  background: #2c3e50; color: #fff;
+  padding: 14px 24px 0;
+  position: sticky; top: 0; z-index: 10;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+.header-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+h1 { font-size: 17px; font-weight: 700; }
+.meta { font-size: 11px; opacity: .55; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  padding: 8px 18px; border: none; background: transparent;
+  color: rgba(255,255,255,.6); font-size: 14px; cursor: pointer;
+  border-bottom: 3px solid transparent; white-space: nowrap;
+  transition: color .15s, border-color .15s; font-family: inherit;
+}
+.tab:hover { color: #fff; }
+.tab.active { color: #fff; border-bottom-color: var(--tc, var(--accent)); }
+.tab-n {
+  display: inline-block; background: rgba(255,255,255,.18);
+  border-radius: 10px; padding: 1px 7px; font-size: 11px; margin-left: 5px;
+}
+.tab.active .tab-n { background: rgba(255,255,255,.32); }
+main {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; padding: 28px 16px 36px;
+}
+.progress { font-size: 14px; color: #999; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+.card-wrap { width: 100%; max-width: 660px; perspective: 1200px; }
+.flash-card {
+  width: 100%; height: 280px; position: relative;
+  cursor: pointer; outline: none;
+}
+.flash-card:focus .fc-inner { box-shadow: 0 0 0 3px rgba(52,152,219,.5); border-radius: 16px; }
+.fc-inner {
+  position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform .42s cubic-bezier(.4,0,.2,1);
+}
+.flash-card.flipped .fc-inner { transform: rotateY(180deg); }
+.fc-front, .fc-back {
+  position: absolute; inset: 0; border-radius: 16px;
+  padding: 28px 36px; backface-visibility: hidden;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+  box-shadow: 0 4px 18px rgba(0,0,0,.11); overflow-y: auto;
+}
+.fc-front { background: #fff; border: 2px solid #e0e6f0; }
+.fc-back  { background: #f0f7ff; border: 2px solid var(--accent); transform: rotateY(180deg); }
+.fc-primary {
+  font-size: 26px; font-weight: 700; color: #2c3e50;
+  line-height: 1.45; word-break: break-word;
+}
+.fc-secondary {
+  font-size: 13px; color: #888; font-style: italic;
+  margin-top: 12px; line-height: 1.6; max-height: 80px; overflow-y: auto;
+}
+.fc-secondary:empty { display: none; }
+.fc-flip-hint { font-size: 11px; color: #ccc; margin-top: auto; padding-top: 10px; }
+.fc-answer {
+  font-size: 18px; color: #2c3e50; line-height: 1.75;
+  white-space: pre-line; text-align: center; word-break: break-word;
+}
+.nav {
+  display: flex; align-items: center; gap: 10px; margin-top: 22px;
+}
+.nav-btn {
+  padding: 10px 20px; border: 2px solid #dde; border-radius: 8px;
+  background: #fff; font-size: 15px; cursor: pointer; color: #555;
+  transition: all .15s; font-family: inherit;
+}
+.nav-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nav-btn:disabled { opacity: .3; cursor: not-allowed; }
+.nav-flip {
+  border-color: var(--accent); color: var(--accent);
+  font-weight: 600; padding: 10px 30px; min-width: 100px;
+}
+.nav-flip:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.kbd-hint { font-size: 11px; color: #c0c8d0; margin-top: 10px; }
+`;
+
+function buildFlashHtml(cards: GeneratedCards, deckName: string): string {
+  const deck = buildFlashDeck(cards);
+  const tabIds = ['vocab', 'cloze', 'character', 'plot'] as const;
+  const activeTabs = tabIds.filter(id => deck[id].length > 0);
+  const firstTab = activeTabs[0] ?? 'vocab';
+
+  const tabButtons = activeTabs.map(id => {
+    const color = FLASH_TAB_COLORS[id];
+    const label = FLASH_TAB_LABELS[id];
+    const count = deck[id].length;
+    const active = id === firstTab ? ' active' : '';
+    return `<button class="tab${active}" data-tab="${id}" style="--tc:${color}">${escapeHtml(label)} <span class="tab-n">${count}</span></button>`;
+  }).join('');
+
+  const generated = new Date().toLocaleString('zh-TW', { hour12: false });
+
+  return `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(deckName)} — 單字卡</title>
+<style>${FLASH_CSS}</style>
+</head>
+<body>
+<header>
+  <div class="header-top">
+    <h1>${escapeHtml(deckName)}</h1>
+    <div class="meta">${generated}</div>
+  </div>
+  <div class="tabs">${tabButtons}</div>
+</header>
+<main>
+  <div class="progress"><span id="prog"></span></div>
+  <div class="card-wrap">
+    <div class="flash-card" id="fc" tabindex="0">
+      <div class="fc-inner">
+        <div class="fc-front">
+          <div id="fc-primary" class="fc-primary"></div>
+          <div id="fc-secondary" class="fc-secondary"></div>
+          <div class="fc-flip-hint">點擊卡片 / 空白鍵 翻面 ▼</div>
+        </div>
+        <div class="fc-back">
+          <div id="fc-answer" class="fc-answer"></div>
+          <div class="fc-flip-hint">點擊卡片 / 空白鍵 翻回 ▲</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="nav">
+    <button id="btn-prev" class="nav-btn" title="上一張 (←)">← 上一張</button>
+    <button id="btn-flip" class="nav-btn nav-flip" title="翻面 (空白)">翻面</button>
+    <button id="btn-next" class="nav-btn" title="下一張 (→)">下一張 →</button>
+  </div>
+  <div class="kbd-hint">← → 換頁 ｜ 空白鍵 / Enter 翻面</div>
+</main>
+<script>
+const DATA = ${JSON.stringify(deck)};
+const COLORS = ${JSON.stringify(FLASH_TAB_COLORS)};
+let tab = ${JSON.stringify(firstTab)}, idx = 0, flipped = false;
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function rend(s) { return esc(s).replace(/\\n/g,'<br>'); }
+
+function render() {
+  const cards = DATA[tab] || [];
+  if (!cards.length) return;
+  const c = cards[idx];
+  document.getElementById('fc-primary').innerHTML = rend(c.primary);
+  document.getElementById('fc-secondary').innerHTML = rend(c.secondary);
+  document.getElementById('fc-answer').innerHTML = rend(c.answer);
+  document.getElementById('prog').textContent = (idx + 1) + ' / ' + cards.length;
+  document.getElementById('fc').classList.toggle('flipped', flipped);
+  const color = COLORS[tab] || '#3498db';
+  document.documentElement.style.setProperty('--accent', color);
+  document.getElementById('btn-prev').disabled = idx === 0;
+  document.getElementById('btn-next').disabled = idx === cards.length - 1;
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+}
+
+function flip() { flipped = !flipped; render(); }
+function prev() { if (idx > 0) { idx--; flipped = false; render(); } }
+function next() { if (idx < (DATA[tab]||[]).length - 1) { idx++; flipped = false; render(); } }
+function switchTab(t) {
+  if (!DATA[t] || !DATA[t].length) return;
+  tab = t; idx = 0; flipped = false; render();
+}
+
+document.getElementById('fc').addEventListener('click', flip);
+document.getElementById('btn-prev').addEventListener('click', prev);
+document.getElementById('btn-flip').addEventListener('click', flip);
+document.getElementById('btn-next').addEventListener('click', next);
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowLeft') prev();
+  else if (e.key === 'ArrowRight') next();
+  else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
+});
+
+render();
+</script>
+</body>
+</html>`;
+}
+
+export function exportToFlashHtml(cards: GeneratedCards, deckName: string, outputDir: string): string {
+  fs.mkdirSync(outputDir, { recursive: true });
+  const safeName = deckName.replace(/[/\\?%*:|"<>]/g, '-');
+  const outputPath = path.join(outputDir, `${safeName}-flash.html`);
+  fs.writeFileSync(outputPath, buildFlashHtml(cards, deckName), 'utf-8');
+  return outputPath;
+}
+
 export function exportToHtml(cards: GeneratedCards, deckName: string, outputDir: string): string {
   fs.mkdirSync(outputDir, { recursive: true });
   const safeName = deckName.replace(/[/\\?%*:|"<>]/g, '-');
