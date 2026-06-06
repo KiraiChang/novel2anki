@@ -24,14 +24,14 @@ function isStorySentence(s: string): boolean {
   return !NON_STORY_PATTERNS.some(re => re.test(s));
 }
 
-function extractSentences(text: string): string[] {
+export function extractSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
     .filter(s => s.length > 30 && s.length < 200 && isStorySentence(s));
 }
 
-function findSentenceWith(word: string, sentences: string[]): string | undefined {
+export function findSentenceWith(word: string, sentences: string[]): string | undefined {
   const lower = word.toLowerCase();
   return sentences.find(s => s.toLowerCase().includes(lower));
 }
@@ -42,7 +42,7 @@ function extractLongWords(text: string): string[] {
   return unique.slice(0, 10);
 }
 
-function extractCapitalizedNames(text: string): string[] {
+export function extractCapitalizedNames(text: string): string[] {
   const names = text.match(/\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b/g) ?? [];
   const filtered = names.filter(n => !['The','This','That','It','He','She','They'].includes(n));
   return [...new Set(filtered)].slice(0, 5);

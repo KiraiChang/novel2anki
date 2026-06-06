@@ -18,6 +18,22 @@
 
 ---
 
+### [STEP-004] DeepL 翻譯模式 + 比對功能 + 成本預估
+**狀態**：已完成
+**目標**：新增 `--deepl` 旗標，以 DeepL API 取代 LLM 翻譯定義；搭配 Claude/Ollama 時自動產生上下堆疊比對 HTML；執行前顯示字元/token 成本預估並請使用者確認。
+
+1. 更新 `docs/STEP.md`，匯出 `mockGenerator.ts` 內部輔助函式
+2. 安裝 `deepl-node`；建立 `src/cards/deeplTranslator.ts`（`translateToZh`、`batchTranslate`、`loadDeepLConfig`）
+3. 建立 `src/nlp/costEstimator.ts`（DeepL 字元估算 + Claude token 估算 + 格式化輸出）
+4. 建立 `src/cards/deeplGenerator.ts`（Free Dictionary API 取英文定義 → DeepL 翻成繁中）
+5. 修改 `src/html/exporter.ts`（新增 `exportToComparisonHtml`，上下堆疊比對視圖）
+6. 修改 `src/index.ts`（`--deepl` 旗標、成本預估確認流程、比對模式路由）
+7. 更新 `.env.example`，補寫 BDD 測試，確認全部通過
+
+**備注**：DeepL 目標語言使用 `ZH` (Traditional Chinese)；Free Dictionary API 無需金鑰；比對模式僅在 `--deepl` + Claude/Ollama 時觸發，mock 不做比對。
+
+---
+
 ### [STEP-003] NLP 前處理管線（CEFR 詞彙分析）
 **狀態**：已完成
 **目標**：在所有生成模式之前插入 NLP 管線（compromise tokenize → lemma → 詞頻 → CEFR 分級），提供結構化詞彙建議；Mock 直接用建議列表選字，Offline/Claude 將建議注入 prompt。
