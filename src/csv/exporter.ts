@@ -65,9 +65,9 @@ function buildCardRows(cards: GeneratedCards, deckName: string): string[] {
     const hint = [
       ROLE_PREFIX,
       `書名：${deckName}`,
-      `請用繁體中文摘要回答以下問題，限60字內，涵蓋主要事件；完成後將 answer_zh 欄的英文原文替換為此摘要。`,
+      `請用繁體中文摘要回答以下問題，限60字內，涵蓋主要事件；回傳格式：繁體中文摘要，空一行後再貼上英文原文，形成中英對照，不要加任何標題或說明。`,
       `問題：${c.question_zh}`,
-      `段落原文：${c.answer_zh}`,
+      `英文原文：${c.answer_zh}`,
     ].join('\n');
     lines.push(row(['plot', deckName, '', '', '', '', '', '', '', '', c.question_zh, c.answer_zh, hint]));
   }

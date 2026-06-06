@@ -38,6 +38,14 @@ export function findSentenceWith(word: string, sentences: string[]): string | un
   return sentences.find(s => s.toLowerCase().includes(lower));
 }
 
+function findSentenceWithRaw(word: string, text: string): string | undefined {
+  const lower = word.toLowerCase();
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map(s => s.trim())
+    .find(s => s.toLowerCase().includes(lower));
+}
+
 function extractLongWords(text: string): string[] {
   const words = text.toLowerCase().match(/\b[a-z]{7,}\b/g) ?? [];
   const unique = [...new Set(words)].filter(w => !STOP_WORDS.has(w));
@@ -72,12 +80,14 @@ function mockVocab(chunk: EnrichedChunk): VocabCard[] {
     ? suggestions.slice(0, 4).map(s => s.original)
     : extractLongWords(storyText).slice(0, 4);
 
-  return words.map(word => ({
-    type: 'vocab' as const,
-    word,
-    definition_zh: '',
-    exampleFromText: findSentenceWith(word, sentences) ?? chunk.text.slice(0, 200),
-  }));
+  return words
+    .map(word => {
+      const exampleFromText =
+        findSentenceWith(word, sentences) ?? findSentenceWithRaw(word, chunk.text);
+      if (!exampleFromText) return null;
+      return { type: 'vocab' as const, word, definition_zh: '', exampleFromText };
+    })
+    .filter((c): c is VocabCard => c !== null);
 }
 
 function mockCloze(chunk: EnrichedChunk): ClozeCard[] {
