@@ -86,8 +86,9 @@ npx ts-node src/index.ts novel.epub --reading
 # 讀書理解模式（Ollama 離線）
 npx ts-node src/index.ts novel.epub --reading --offline
 
-# 額外輸出單字卡 HTML（可與任何模式並用）
+# 額外輸出單字卡 HTML（可與任何模式並用，包含 --reading）
 npx ts-node src/index.ts novel.epub --mock --flash
+npx ts-node src/index.ts novel.epub --reading --mock --flash
 npx ts-node src/index.ts output/novel.csv --flash
 ```
 

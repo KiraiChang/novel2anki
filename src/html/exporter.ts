@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard } from '../cards/types';
+import { ReadingCards } from '../cards/readingTypes';
 
 function escapeHtml(s: string): string {
   return s
@@ -309,14 +310,7 @@ interface FlashCard {
   answer: string;    // 翻面後的答案
 }
 
-interface FlashDeck {
-  vocab: FlashCard[];
-  cloze: FlashCard[];
-  character: FlashCard[];
-  plot: FlashCard[];
-}
-
-function buildFlashDeck(cards: GeneratedCards): FlashDeck {
+function buildFlashDeck(cards: GeneratedCards): Record<string, FlashCard[]> {
   return {
     vocab: cards.vocab.map(c => ({
       primary: c.word,
@@ -342,13 +336,25 @@ function buildFlashDeck(cards: GeneratedCards): FlashDeck {
   };
 }
 
-const FLASH_TAB_COLORS: Record<string, string> = {
-  vocab: '#3498db', cloze: '#27ae60', character: '#9b59b6', plot: '#e67e22',
-};
+interface FlashTabConfig {
+  id: string;
+  label: string;
+  color: string;
+}
 
-const FLASH_TAB_LABELS: Record<string, string> = {
-  vocab: '📚 詞彙', cloze: '✏️ 克漏字', character: '🧑 人物', plot: '📖 情節',
-};
+const STANDARD_TABS: FlashTabConfig[] = [
+  { id: 'vocab',     label: '📚 詞彙',   color: '#3498db' },
+  { id: 'cloze',     label: '✏️ 克漏字', color: '#27ae60' },
+  { id: 'character', label: '🧑 人物',   color: '#9b59b6' },
+  { id: 'plot',      label: '📖 情節',   color: '#e67e22' },
+];
+
+const READING_TABS: FlashTabConfig[] = [
+  { id: 'terms',    label: '📚 術語',   color: '#0d47a1' },
+  { id: 'causes',   label: '⚡ 因果',   color: '#e65100' },
+  { id: 'chapters', label: '📖 章節',   color: '#1b5e20' },
+  { id: 'themes',   label: '🎨 主題',   color: '#4a148c' },
+];
 
 const FLASH_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -441,18 +447,19 @@ main {
 .kbd-hint { font-size: 11px; color: #c0c8d0; margin-top: 10px; }
 `;
 
-function buildFlashHtml(cards: GeneratedCards, deckName: string): string {
-  const deck = buildFlashDeck(cards);
-  const tabIds = ['vocab', 'cloze', 'character', 'plot'] as const;
-  const activeTabs = tabIds.filter(id => deck[id].length > 0);
-  const firstTab = activeTabs[0] ?? 'vocab';
+function buildFlashHtmlFromData(
+  data: Record<string, FlashCard[]>,
+  tabConfigs: FlashTabConfig[],
+  deckName: string,
+): string {
+  const activeTabs = tabConfigs.filter(t => (data[t.id] ?? []).length > 0);
+  const firstTab = activeTabs[0]?.id ?? tabConfigs[0]?.id ?? '';
+  const colors = Object.fromEntries(tabConfigs.map(t => [t.id, t.color]));
 
-  const tabButtons = activeTabs.map(id => {
-    const color = FLASH_TAB_COLORS[id];
-    const label = FLASH_TAB_LABELS[id];
-    const count = deck[id].length;
-    const active = id === firstTab ? ' active' : '';
-    return `<button class="tab${active}" data-tab="${id}" style="--tc:${color}">${escapeHtml(label)} <span class="tab-n">${count}</span></button>`;
+  const tabButtons = activeTabs.map(t => {
+    const count = (data[t.id] ?? []).length;
+    const active = t.id === firstTab ? ' active' : '';
+    return `<button class="tab${active}" data-tab="${t.id}" style="--tc:${t.color}">${escapeHtml(t.label)} <span class="tab-n">${count}</span></button>`;
   }).join('');
 
   const generated = new Date().toLocaleString('zh-TW', { hour12: false });
@@ -498,8 +505,8 @@ function buildFlashHtml(cards: GeneratedCards, deckName: string): string {
   <div class="kbd-hint">← → 換頁 ｜ 空白鍵 / Enter 翻面</div>
 </main>
 <script>
-const DATA = ${JSON.stringify(deck)};
-const COLORS = ${JSON.stringify(FLASH_TAB_COLORS)};
+const DATA = ${JSON.stringify(data)};
+const COLORS = ${JSON.stringify(colors)};
 let tab = ${JSON.stringify(firstTab)}, idx = 0, flipped = false;
 
 function esc(s) {
@@ -552,11 +559,49 @@ render();
 </html>`;
 }
 
+function buildFlashHtml(cards: GeneratedCards, deckName: string): string {
+  return buildFlashHtmlFromData(buildFlashDeck(cards), STANDARD_TABS, deckName);
+}
+
+function buildReadingFlashHtml(cards: ReadingCards, deckName: string): string {
+  const data: Record<string, FlashCard[]> = {
+    terms: cards.terms.map(c => ({
+      primary: c.word,
+      secondary: c.exampleFromText,
+      answer: c.definition_zh || '（尚未填入定義）',
+    })),
+    causes: cards.causes.map(c => ({
+      primary: c.question_zh,
+      secondary: '',
+      answer: c.answer_zh,
+    })),
+    chapters: cards.chapters.map(c => ({
+      primary: c.question_zh,
+      secondary: '',
+      answer: c.answer_zh,
+    })),
+    themes: cards.themes.map(c => ({
+      primary: c.name,
+      secondary: c.firstMention,
+      answer: c.description_zh || '（尚未填入象徵意義）',
+    })),
+  };
+  return buildFlashHtmlFromData(data, READING_TABS, deckName);
+}
+
 export function exportToFlashHtml(cards: GeneratedCards, deckName: string, outputDir: string): string {
   fs.mkdirSync(outputDir, { recursive: true });
   const safeName = deckName.replace(/[/\\?%*:|"<>]/g, '-');
   const outputPath = path.join(outputDir, `${safeName}-flash.html`);
   fs.writeFileSync(outputPath, buildFlashHtml(cards, deckName), 'utf-8');
+  return outputPath;
+}
+
+export function exportReadingToFlashHtml(cards: ReadingCards, deckName: string, outputDir: string): string {
+  fs.mkdirSync(outputDir, { recursive: true });
+  const safeName = deckName.replace(/[/\\?%*:|"<>]/g, '-');
+  const outputPath = path.join(outputDir, `${safeName}-reading-flash.html`);
+  fs.writeFileSync(outputPath, buildReadingFlashHtml(cards, deckName), 'utf-8');
   return outputPath;
 }
 

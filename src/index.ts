@@ -16,7 +16,7 @@ import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards
 import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
-import { exportToHtml, exportToFlashHtml, exportToComparisonHtml } from './html/exporter';
+import { exportToHtml, exportToFlashHtml, exportReadingToFlashHtml, exportToComparisonHtml } from './html/exporter';
 import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv/exporter';
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import * as fs from 'fs';
@@ -184,64 +184,38 @@ program
 
     // ── Reading 模式（讀書理解導向） ───────────────────────────────────────────
     if (options.reading) {
+      let readingCards;
       if (options.mock) {
         console.log(chalk.yellow('正在分析書籍內容（讀書理解模式）...'));
-        const readingCards = generateReadingMockCards(enrichedChunks);
-        const total = readingCards.terms.length + readingCards.causes.length +
-          readingCards.chapters.length + readingCards.themes.length;
-        console.log('');
-        console.log(chalk.cyan('讀書理解字卡統計：'));
-        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
-        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
-        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
-        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
-        console.log(chalk.bold(`  合計：       ${total} 張`));
-        console.log('');
-        console.log(chalk.yellow('正在匯出檔案...'));
-        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
-        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
-        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
-        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
-        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+        readingCards = generateReadingMockCards(enrichedChunks);
       } else if (options.offline) {
         console.log(chalk.yellow(`正在分析書籍內容（讀書理解模式 × Ollama ${ollamaConfig!.model}）...`));
-        const readingCards = await generateReadingOfflineCards(enrichedChunks, deckName, ollamaConfig!);
-        const total = readingCards.terms.length + readingCards.causes.length +
-          readingCards.chapters.length + readingCards.themes.length;
-        console.log('');
-        console.log(chalk.cyan('讀書理解字卡統計：'));
-        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
-        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
-        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
-        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
-        console.log(chalk.bold(`  合計：       ${total} 張`));
-        console.log('');
-        console.log(chalk.yellow('正在匯出檔案...'));
-        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
-        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
-        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
-        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
-        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+        readingCards = await generateReadingOfflineCards(enrichedChunks, deckName, ollamaConfig!);
       } else {
         console.log(chalk.yellow('正在分析書籍內容（讀書理解模式 × Claude API）...'));
-        const readingCards = await generateReadingCards(enrichedChunks, deckName);
-        const total = readingCards.terms.length + readingCards.causes.length +
-          readingCards.chapters.length + readingCards.themes.length;
-        console.log('');
-        console.log(chalk.cyan('讀書理解字卡統計：'));
-        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
-        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
-        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
-        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
-        console.log(chalk.bold(`  合計：       ${total} 張`));
-        console.log('');
-        console.log(chalk.yellow('正在匯出檔案...'));
-        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
-        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
-        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
-        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
-        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+        readingCards = await generateReadingCards(enrichedChunks, deckName);
       }
+
+      const total = readingCards.terms.length + readingCards.causes.length +
+        readingCards.chapters.length + readingCards.themes.length;
+      console.log('');
+      console.log(chalk.cyan('讀書理解字卡統計：'));
+      console.log(`  術語卡：     ${readingCards.terms.length} 張`);
+      console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
+      console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
+      console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
+      console.log(chalk.bold(`  合計：       ${total} 張`));
+      console.log('');
+      console.log(chalk.yellow('正在匯出檔案...'));
+      const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
+      const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
+      console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+      console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+      if (options.flash) {
+        const flashPath = exportReadingToFlashHtml(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
+      }
+      console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
       console.log('');
       console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
       return;
