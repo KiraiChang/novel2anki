@@ -11,3 +11,7 @@
 - [ ] 支援讀取 `.env.local`，或提供 `--api-key` CLI 參數
 - [ ] 新增 `--sort` 選項：卡片依字母 / 類型排序後匯出
 - [ ] 移除未使用的 devDependency：`@types/archiver`
+
+## Mock 模式
+
+Mock 模式的待修項目獨立維護於 [mock/TODOS.md](mock/TODOS.md)。

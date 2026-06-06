@@ -49,7 +49,7 @@ CLI 輸入
 | EPUB 提取 | `src/epub/extractor.ts` | epub2 → stripHtml → 分割 → Chunk[] |
 | 型別定義 | `src/cards/types.ts` | Chunk、*Card、GeneratedCards 介面 |
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
-| Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API |
+| Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API → 詳見 [mock/ARCHITECTURE.md](mock/ARCHITECTURE.md) |
 | 卡片模板 | `src/cards/templates.ts` | Anki HTML/CSS 模板常數 |
 | Anki 匯出器 | `src/anki/exporter.ts` | SQLite 建構、ZIP 打包、.apkg 輸出 |
 | HTML 匯出器 | `src/html/exporter.ts` | GeneratedCards → 自含式 HTML 預覽頁 |
