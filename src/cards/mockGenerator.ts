@@ -42,10 +42,23 @@ function extractLongWords(text: string): string[] {
   return unique.slice(0, 10);
 }
 
+// 常見功能詞：即使出現在句子中間也不是專有名詞
+const FUNCTION_WORDS = new Set([
+  'The','This','That','These','Those',
+  'He','She','It','They','We','You','I',
+  'His','Her','Its','Their','Our','Your','My',
+  'But','And','Or','Yet','So','For','Nor',
+  'With','From','Into','Upon','Unto','Over','Under','After','Before',
+  'Then','Now','Still','Just','Even','Only','Also','Soon','Here','There',
+  'Had','Was','Were','Has','Have','Did','Does','Not',
+  'What','When','Where','Who','Which','How','Why',
+  'All','Any','Some','Such','Each','Every','Both',
+]);
+
 export function extractCapitalizedNames(text: string): string[] {
-  const names = text.match(/\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b/g) ?? [];
-  const filtered = names.filter(n => !['The','This','That','It','He','She','They'].includes(n));
-  return [...new Set(filtered)].slice(0, 5);
+  // lookbehind: 只取前面是小寫字母或逗號/分號的大寫字，濾掉句首大寫
+  const names = text.match(/(?<=[a-z,;]\s)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b/g) ?? [];
+  return [...new Set(names)].filter(n => !FUNCTION_WORDS.has(n)).slice(0, 5);
 }
 
 function mockVocab(chunk: EnrichedChunk): VocabCard[] {
