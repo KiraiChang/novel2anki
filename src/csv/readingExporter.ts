@@ -107,6 +107,7 @@ export function exportReadingToCsvSplits(
   cards: ReadingCards,
   deckName: string,
   outputDir: string,
+  chunkSize?: number,
 ): string[] {
   fs.mkdirSync(outputDir, { recursive: true });
   const safeName = deckName.replace(/[/\\?%*:|"<>]/g, '-');
@@ -118,11 +119,35 @@ export function exportReadingToCsvSplits(
     { label: 'themes',   rows: buildThemeRows(cards.themes, deckName) },
   ].filter(s => s.rows.length > 0);
 
-  const digits = Math.max(2, String(sections.length).length);
-  return sections.map((s, i) => {
-    const seq = String(i + 1).padStart(digits, '0');
-    const filePath = path.join(outputDir, `${safeName}-reading-ch-${seq}-${s.label}.csv`);
-    fs.writeFileSync(filePath, [row(HEADERS), ...s.rows].join('\n'), 'utf-8');
-    return filePath;
-  });
+  const typeDigits = Math.max(2, String(sections.length).length);
+  const paths: string[] = [];
+
+  for (let i = 0; i < sections.length; i++) {
+    const { label, rows } = sections[i];
+    const typeSeq = String(i + 1).padStart(typeDigits, '0');
+
+    if (!chunkSize || rows.length <= chunkSize) {
+      const filePath = path.join(outputDir, `${safeName}-reading-ch-${typeSeq}-${label}.csv`);
+      fs.writeFileSync(filePath, [row(HEADERS), ...rows].join('\n'), 'utf-8');
+      paths.push(filePath);
+    } else {
+      // 超過上限：細分為多個 part
+      const parts: string[][] = [];
+      for (let j = 0; j < rows.length; j += chunkSize) {
+        parts.push(rows.slice(j, j + chunkSize));
+      }
+      const partDigits = Math.max(2, String(parts.length).length);
+      for (let p = 0; p < parts.length; p++) {
+        const partSeq = String(p + 1).padStart(partDigits, '0');
+        const filePath = path.join(
+          outputDir,
+          `${safeName}-reading-ch-${typeSeq}-${partSeq}-${label}.csv`,
+        );
+        fs.writeFileSync(filePath, [row(HEADERS), ...parts[p]].join('\n'), 'utf-8');
+        paths.push(filePath);
+      }
+    }
+  }
+
+  return paths;
 }

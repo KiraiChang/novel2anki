@@ -213,8 +213,9 @@ program
         const flashPath = exportReadingToFlashHtml(readingCards, deckName, options.output);
         console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
       }
-      if (options.splitChapters) {
-        const csvPaths = exportReadingToCsvSplits(readingCards, deckName, options.output);
+      if (options.splitChapters || options.splitSize) {
+        const chunkSize = options.splitSize ? parseInt(options.splitSize, 10) : undefined;
+        const csvPaths = exportReadingToCsvSplits(readingCards, deckName, options.output, chunkSize);
         console.log(chalk.green(`✓ CSV 分割：   ${csvPaths.length} 個檔案`));
         csvPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
         console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${options.output} -d "${deckName}")`));

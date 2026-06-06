@@ -186,19 +186,29 @@ npx ts-node src/index.ts novel.epub --reading
 # Ollama 離線模式
 npx ts-node src/index.ts novel.epub --reading --offline
 
-# 依卡片類型切割為 4 個 CSV（術語 / 因果 / 章節 / 主題），方便分批 AI 處理
+# 依卡片類型切割為 4 個 CSV（術語 / 因果 / 章節 / 主題）
 npx ts-node src/index.ts novel.epub --reading --mock --split-chapters
+
+# 某類型卡片過多時，再以 --split-size 細分（每檔最多 N 張）
+npx ts-node src/index.ts novel.epub --reading --mock --split-chapters --split-size 20
 
 # 切割 + 單字卡 HTML 三合一
 npx ts-node src/index.ts novel.epub --reading --mock --split-chapters --flash
 ```
 
-`--split-chapters` 搭配 `--reading` 輸出：
+`--split-chapters` 搭配 `--reading` 輸出（不帶 `--split-size`）：
 ```
 output/{deck}-reading-ch-01-terms.csv      # 全書術語卡
 output/{deck}-reading-ch-02-causes.csv     # 因果事件卡
 output/{deck}-reading-ch-03-chapters.csv   # 章節脈絡卡（每章一行）
 output/{deck}-reading-ch-04-themes.csv     # 主題意象卡
+```
+
+加上 `--split-size 20`，某類型超過 20 張時自動細分：
+```
+output/{deck}-reading-ch-03-01-chapters.csv   # 第 1–20 章
+output/{deck}-reading-ch-03-02-chapters.csv   # 第 21–40 章
+output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 ```
 填入後整目錄打包：`npx ts-node src/index.ts output/ -d "My Novel"`
 
