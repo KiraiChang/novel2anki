@@ -1,0 +1,2 @@
+# novel2anki
+用typescript撰寫透過解析pdf或是epub的小說來製作anki的字卡
