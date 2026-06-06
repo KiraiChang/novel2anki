@@ -1,9 +1,10 @@
 import { loadOllamaConfig, generateCards, OllamaConfig } from '../../cards/offlineGenerator';
-import { Chunk } from '../../cards/types';
+import { EnrichedChunk, EMPTY_CHUNK_NLP } from '../../nlp/types';
 
-const TEST_CHUNK: Chunk = {
+const TEST_CHUNK: EnrichedChunk = {
   index: 0,
   text: 'The arduous journey had taken its toll on the weary travellers. Elizabeth walked into the dimly lit corridor, her heart pounding with trepidation.',
+  nlp: EMPTY_CHUNK_NLP,
 };
 
 // ── loadOllamaConfig ──────────────────────────────────────────────────────────

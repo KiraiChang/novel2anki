@@ -18,6 +18,20 @@
 
 ---
 
+### [STEP-003] NLP 前處理管線（CEFR 詞彙分析）
+**狀態**：已完成
+**目標**：在所有生成模式之前插入 NLP 管線（compromise tokenize → lemma → 詞頻 → CEFR 分級），提供結構化詞彙建議；Mock 直接用建議列表選字，Offline/Claude 將建議注入 prompt。
+
+1. 建立靜態資料：`src/data/cefr-wordlist.json`、`src/nlp/types.ts`、`src/nlp/stopWords.ts`
+2. 實作 NLP 核心函式：`textCleaner`、`tokenizer`、`lemmatizer`、`freqAnalyzer`（安裝 compromise）
+3. 實作 `cefrLookup.ts` 與 `pipeline.ts`、`promptHelper.ts`
+4. 整合三個生成器（mockGenerator / offlineGenerator / generator）
+5. 修改 `index.ts` 串接管線，更新 docs/
+
+**備注**：使用 `EnrichedChunk extends Chunk`（必填 `nlp` 欄位），管線失敗時填 `EMPTY_CHUNK_NLP` 降級。
+
+---
+
 ### [STEP-002] 離線模式（Ollama 整合）
 **狀態**：已完成
 **目標**：新增 `--offline` 旗標，透過本機 Ollama LLM 產生字卡，不需網路或 API Key；模型名稱可透過 `--model` 或 `OLLAMA_MODEL` 環境變數自訂。

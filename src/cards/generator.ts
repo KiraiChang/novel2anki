@@ -1,7 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  Chunk, GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard
+  GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard
 } from './types';
+import { EnrichedChunk } from '../nlp/types';
+import { buildNlpHint } from '../nlp/promptHelper';
 
 const client = new Anthropic();
 
@@ -34,11 +36,11 @@ async function callClaude(userPrompt: string, toolName: string, toolSchema: obje
   return toolUse.input as CardToolInput;
 }
 
-async function generateVocab(chunk: Chunk): Promise<VocabCard[]> {
+async function generateVocab(chunk: EnrichedChunk): Promise<VocabCard[]> {
   const prompt = `請從以下英文小說段落中挑選 3-5 個進階單字或片語，為每個單字產生字卡。
 
 段落：
-${chunk.text}`;
+${chunk.text}${buildNlpHint(chunk, 10)}`;
 
   const schema = {
     type: 'object',
@@ -63,11 +65,11 @@ ${chunk.text}`;
   return result.cards.map(c => ({ type: 'vocab' as const, ...c }));
 }
 
-async function generateCloze(chunk: Chunk): Promise<ClozeCard[]> {
+async function generateCloze(chunk: EnrichedChunk): Promise<ClozeCard[]> {
   const prompt = `請從以下英文小說段落中選取 2-3 個關鍵句子，將最重要的片語做成克漏字格式（{{c1::片語}}）。
 
 段落：
-${chunk.text}`;
+${chunk.text}${buildNlpHint(chunk, 10)}`;
 
   const schema = {
     type: 'object',
@@ -91,7 +93,7 @@ ${chunk.text}`;
   return result.cards.map(c => ({ type: 'cloze' as const, ...c }));
 }
 
-async function generateCharacter(chunk: Chunk): Promise<CharacterCard[]> {
+async function generateCharacter(chunk: EnrichedChunk): Promise<CharacterCard[]> {
   const prompt = `請從以下英文小說段落中找出出現的人物、地點或重要概念（如有），為每個產生介紹字卡。若段落中沒有明顯的新人物或概念，可回傳空陣列。
 
 段落：
@@ -120,7 +122,7 @@ ${chunk.text}`;
   return result.cards.map(c => ({ type: 'character' as const, ...c }));
 }
 
-async function generatePlot(chunk: Chunk): Promise<PlotCard[]> {
+async function generatePlot(chunk: EnrichedChunk): Promise<PlotCard[]> {
   const prompt = `請根據以下英文小說段落，產生 1-2 張情節摘要問答字卡，幫助讀者記憶重要劇情。
 
 段落${chunk.chapter ? `（${chunk.chapter}）` : ''}：
@@ -150,7 +152,7 @@ ${chunk.text}`;
 
 export type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot';
 
-export async function generateCards(chunk: Chunk, types: CardTypes[]): Promise<GeneratedCards> {
+export async function generateCards(chunk: EnrichedChunk, types: CardTypes[]): Promise<GeneratedCards> {
   const results = await Promise.all([
     types.includes('vocab') ? generateVocab(chunk) : Promise.resolve([]),
     types.includes('cloze') ? generateCloze(chunk) : Promise.resolve([]),

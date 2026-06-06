@@ -1,6 +1,8 @@
 import {
-  Chunk, GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard
+  GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard
 } from './types';
+import { EnrichedChunk } from '../nlp/types';
+import { buildNlpHint } from '../nlp/promptHelper';
 
 export type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot';
 
@@ -132,12 +134,12 @@ async function callOllama<T>(
   return { cards: [] } as unknown as T;
 }
 
-async function generateVocab(chunk: Chunk, config: OllamaConfig): Promise<VocabCard[]> {
+async function generateVocab(chunk: EnrichedChunk, config: OllamaConfig): Promise<VocabCard[]> {
   const prompt = `請從以下英文小說段落中挑選 3-5 個進階單字或片語，為每個產生字卡。
 exampleFromText 必須逐字引用段落中的原句，不可改寫。
 
 段落：
-${chunk.text}
+${chunk.text}${buildNlpHint(chunk, 8)}
 
 輸出範例：
 {"cards":[{"word":"arduous","definition_zh":"（形容詞）艱難的、費力的","exampleFromText":"The arduous journey had taken its toll on them."}]}`;
@@ -167,11 +169,11 @@ ${chunk.text}
   return (result.cards ?? []).map(c => ({ type: 'vocab' as const, ...c }));
 }
 
-async function generateCloze(chunk: Chunk, config: OllamaConfig): Promise<ClozeCard[]> {
+async function generateCloze(chunk: EnrichedChunk, config: OllamaConfig): Promise<ClozeCard[]> {
   const prompt = `請從以下英文小說段落中選取 2-3 個關鍵句子，將最重要的動詞或名詞片語做成克漏字格式：{{c1::片語}}。
 
 段落：
-${chunk.text}
+${chunk.text}${buildNlpHint(chunk, 8)}
 
 輸出範例：
 {"cards":[{"text":"She walked into the {{c1::dimly lit}} corridor.","hint_zh":"描述走廊光線的形容詞片語"}]}`;
@@ -200,7 +202,7 @@ ${chunk.text}
   return (result.cards ?? []).map(c => ({ type: 'cloze' as const, ...c }));
 }
 
-async function generateCharacter(chunk: Chunk, config: OllamaConfig): Promise<CharacterCard[]> {
+async function generateCharacter(chunk: EnrichedChunk, config: OllamaConfig): Promise<CharacterCard[]> {
   const prompt = `請從以下英文小說段落中找出出現的人物、地點或重要概念（如有）。
 若段落中沒有明顯的新人物、地點或重要概念，請回傳 {"cards":[]}，不要捏造。
 firstMention 必須逐字引用段落中首次提及的原句。
@@ -236,7 +238,7 @@ ${chunk.text}
   return (result.cards ?? []).map(c => ({ type: 'character' as const, ...c }));
 }
 
-async function generatePlot(chunk: Chunk, config: OllamaConfig): Promise<PlotCard[]> {
+async function generatePlot(chunk: EnrichedChunk, config: OllamaConfig): Promise<PlotCard[]> {
   const prompt = `請根據以下英文小說段落，產生 1-2 張情節摘要問答字卡。
 問題和答案都使用繁體中文，問題需具體（不能只問「這段描述什麼」）。
 
@@ -271,7 +273,7 @@ ${chunk.text}
 }
 
 export async function generateCards(
-  chunk: Chunk,
+  chunk: EnrichedChunk,
   types: CardTypes[],
   config: OllamaConfig
 ): Promise<GeneratedCards> {

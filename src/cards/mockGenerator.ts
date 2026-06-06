@@ -1,16 +1,7 @@
-import { Chunk, GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard } from './types';
+import { GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard } from './types';
 import { CardTypes } from './generator';
-
-const COMMON_WORDS = new Set([
-  'the','a','an','and','or','but','in','on','at','to','for','of','with','by',
-  'from','is','are','was','were','be','been','being','have','has','had','do',
-  'does','did','will','would','could','should','may','might','shall','can',
-  'not','no','so','if','as','it','its','this','that','these','those','he',
-  'she','they','we','you','i','my','his','her','their','our','your','his',
-  'what','which','who','when','where','how','all','more','also','just','then',
-  'than','there','about','into','up','out','over','after','before','between',
-  'said','says','say','one','two','three','like','get','got','go','went',
-]);
+import { EnrichedChunk } from '../nlp/types';
+import { STOP_WORDS } from '../nlp/stopWords';
 
 function extractSentences(text: string): string[] {
   return text
@@ -21,7 +12,7 @@ function extractSentences(text: string): string[] {
 
 function extractLongWords(text: string): string[] {
   const words = text.toLowerCase().match(/\b[a-z]{7,}\b/g) ?? [];
-  const unique = [...new Set(words)].filter(w => !COMMON_WORDS.has(w));
+  const unique = [...new Set(words)].filter(w => !STOP_WORDS.has(w));
   return unique.slice(0, 10);
 }
 
@@ -31,18 +22,23 @@ function extractCapitalizedNames(text: string): string[] {
   return [...new Set(filtered)].slice(0, 5);
 }
 
-function mockVocab(chunk: Chunk): VocabCard[] {
-  const words = extractLongWords(chunk.text).slice(0, 4);
+function mockVocab(chunk: EnrichedChunk): VocabCard[] {
+  const suggestions = chunk.nlp.vocabSuggestions;
   const sentences = extractSentences(chunk.text);
+
+  const words = suggestions.length > 0
+    ? suggestions.slice(0, 4).map(s => s.original)
+    : extractLongWords(chunk.text).slice(0, 4);
+
   return words.map((word, i) => ({
     type: 'vocab' as const,
     word,
     definition_zh: `【模擬】「${word}」的繁體中文定義（請以 API 模式重新產生）`,
-    exampleFromText: sentences[i % sentences.length] ?? chunk.text.slice(0, 100),
+    exampleFromText: sentences[i % Math.max(sentences.length, 1)] ?? chunk.text.slice(0, 100),
   }));
 }
 
-function mockCloze(chunk: Chunk): ClozeCard[] {
+function mockCloze(chunk: EnrichedChunk): ClozeCard[] {
   const sentences = extractSentences(chunk.text).slice(0, 2);
   return sentences.map(sentence => {
     const words = sentence.split(' ').filter(w => w.length >= 5);
@@ -57,7 +53,7 @@ function mockCloze(chunk: Chunk): ClozeCard[] {
   });
 }
 
-function mockCharacter(chunk: Chunk): CharacterCard[] {
+function mockCharacter(chunk: EnrichedChunk): CharacterCard[] {
   const names = extractCapitalizedNames(chunk.text).slice(0, 2);
   const sentences = extractSentences(chunk.text);
   return names.map((name, i) => ({
@@ -68,7 +64,7 @@ function mockCharacter(chunk: Chunk): CharacterCard[] {
   }));
 }
 
-function mockPlot(chunk: Chunk): PlotCard[] {
+function mockPlot(chunk: EnrichedChunk): PlotCard[] {
   const sentences = extractSentences(chunk.text);
   const summary = sentences.slice(0, 3).join(' ');
   return [{
@@ -78,7 +74,7 @@ function mockPlot(chunk: Chunk): PlotCard[] {
   }];
 }
 
-export function generateMockCards(chunk: Chunk, types: CardTypes[]): GeneratedCards {
+export function generateMockCards(chunk: EnrichedChunk, types: CardTypes[]): GeneratedCards {
   return {
     vocab: types.includes('vocab') ? mockVocab(chunk) : [],
     cloze: types.includes('cloze') ? mockCloze(chunk) : [],

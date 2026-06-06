@@ -14,14 +14,23 @@ CLI 輸入
   └─ .epub → src/epub/extractor.ts → Chunk[]
                    │
                    ▼
+         NLP 前處理管線（全模式）
+         src/nlp/pipeline.ts
+         cleanText → tokenize → lemmatize
+         → 詞頻分析 → CEFR 查表
+                   │
+                   ▼
+           EnrichedChunk[]（含 vocabSuggestions）
+                   │
+                   ▼
            逐 Chunk 處理
                    │
        ┌───────────┼───────────┐
      --mock     --offline    API 模式（預設）
        │            │            │
 mockGenerator  offlineGenerator  generator.ts
-（規則式）     （Ollama fetch，  （Claude 工具呼叫，
-               循序 4 類）       4 類並行）
+（vocabSugg   （Ollama fetch，  （Claude 工具呼叫，
+直接選字）     prompt 注入 NLP）  prompt 注入 NLP）
        │            │            │
        └────────────┴────────────┘
                    │
@@ -51,6 +60,10 @@ mockGenerator  offlineGenerator  generator.ts
 | EPUB 提取 | `src/epub/extractor.ts` | epub2 → stripHtml → 分割 → Chunk[] |
 | 型別定義 | `src/cards/types.ts` | Chunk、*Card、GeneratedCards 介面 |
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
+| NLP 管線 | `src/nlp/pipeline.ts` | compromise tokenize → lemma → 詞頻 → CEFR 分級 → EnrichedChunk[] |
+| NLP 型別 | `src/nlp/types.ts` | `EnrichedChunk`、`ChunkNLP`、`VocabSuggestion`、`CefrLevel` |
+| CEFR 查詢 | `src/nlp/cefrLookup.ts` | `lookupCefrLevel()`、`generateVocabSuggestions()` |
+| NLP 輔助 | `src/nlp/promptHelper.ts` | `buildNlpHint()` — 注入 LLM prompt 的建議詞彙區塊 |
 | 離線生成 | `src/cards/offlineGenerator.ts` | Ollama fetch（循序），零新套件 → 詳見 [offline/ARCHITECTURE.md](offline/ARCHITECTURE.md) |
 | Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API → 詳見 [mock/ARCHITECTURE.md](mock/ARCHITECTURE.md) |
 | 卡片模板 | `src/cards/templates.ts` | Anki HTML/CSS 模板常數 |
@@ -90,3 +103,4 @@ type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot'
 | `chalk` | 終端彩色輸出 |
 | `dotenv` | 載入 `.env` 環境變數 |
 | `fetch()` | Node 18+ 內建，`offlineGenerator.ts` 呼叫 Ollama REST API（不引入新套件） |
+| `compromise` | 純 JS NLP，tokenize / POS / lemma（verbs→infinitive，nouns→singular） |

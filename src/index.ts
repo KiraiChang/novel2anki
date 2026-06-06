@@ -10,6 +10,8 @@ import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml } from './html/exporter';
 import { GeneratedCards } from './cards/types';
+import { runNlpPipeline } from './nlp/pipeline';
+import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
 
 const VALID_TYPES: CardTypes[] = ['vocab', 'cloze', 'character', 'plot'];
 
@@ -73,14 +75,26 @@ program
     let chunks = await extractor(pdfFile);
     if (isFinite(maxChunks)) chunks = chunks.slice(0, maxChunks);
     console.log(chalk.green(`✓ 共切出 ${chunks.length} 個段落區塊`));
+
+    // NLP 前處理管線
+    console.log(chalk.yellow('正在執行 NLP 前處理...'));
+    let enrichedChunks: EnrichedChunk[];
+    try {
+      enrichedChunks = runNlpPipeline(chunks);
+      const totalSuggestions = enrichedChunks.reduce((s, c) => s + c.nlp.vocabSuggestions.length, 0);
+      console.log(chalk.green(`✓ NLP 完成，共識別 ${totalSuggestions} 個建議詞彙`));
+    } catch (err) {
+      console.log(chalk.yellow(`⚠ NLP 管線失敗，以原始模式繼續：${(err as Error).message}`));
+      enrichedChunks = chunks.map(c => ({ ...c, nlp: EMPTY_CHUNK_NLP }));
+    }
     console.log('');
 
     const allCards: GeneratedCards = { vocab: [], cloze: [], character: [], plot: [] };
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
+    for (let i = 0; i < enrichedChunks.length; i++) {
+      const chunk = enrichedChunks[i];
       const label = chunk.chapter ? `${chunk.chapter} ` : '';
-      process.stdout.write(chalk.yellow(`正在處理區塊 ${i + 1}/${chunks.length} ${label}...`));
+      process.stdout.write(chalk.yellow(`正在處理區塊 ${i + 1}/${enrichedChunks.length} ${label}...`));
 
       try {
         const cards = options.mock

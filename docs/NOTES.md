@@ -16,6 +16,12 @@
 
 - **`@types/archiver` 為殘留相依**：專案最終改用 `jszip` 打包，`archiver` 未被引用，可安全移除。
 
+- **NLP 管線使用 compromise 的 POS 分類做形態還原**：`Verb / Infinitive / PastTense / Gerund` 類的 token 用 `toInfinitive()` 還原，`Noun / Plural` 用 `toSingular()` 還原，其他類直接用 `normal`（小寫去標點）。compromise v14 不規則動詞覆蓋率約 95%，少數找不到的詞會 fallback 到 normal，僅影響 CEFR 查不到對應詞條，不會報錯。
+
+- **CEFR 詞表篩選範圍為 B1-C2**：A1/A2 為過於基礎的詞彙，讀英文小說的使用者無需特別學習，管線在 `generateVocabSuggestions` 時直接過濾掉。
+
+- **NLP 管線失敗時降級為空 vocabSuggestions**：`processChunk` 內以 try/catch 包覆，失敗時回傳 `EMPTY_CHUNK_NLP`，三個生成器各自有 `suggestions.length === 0` 的降級路徑，整體流程不中斷。
+
 - **離線模式選用 Ollama 原生 `/api/chat` 而非 `/v1/chat/completions`**：原生端點支援 `format.json_schema` 結構化輸出，OpenAI 相容層不一定透傳此功能。
 
 - **離線模式改循序呼叫**：Claude API 模式使用 `Promise.all` 並行發出 4 個請求；Ollama 模式改為循序 `await`，原因是本地 Ollama 同一時間只能跑一個推理任務，並行請求不會加速，徒增 HTTP 連線開銷。

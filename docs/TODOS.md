@@ -4,6 +4,7 @@
 
 - [x] 同步產生 HTML 預覽檔，可直接用瀏覽器查看所有字卡（`src/html/exporter.ts`）
 - [x] 離線模式：`--offline` 旗標透過本機 Ollama 產生字卡，`--model` 自訂模型名稱（`src/cards/offlineGenerator.ts`）
+- [x] NLP 前處理管線：compromise tokenize → lemma → 詞頻 → CEFR 分級，提供 `vocabSuggestions` 給所有生成模式（`src/nlp/`）
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併
 - [ ] 多重填空支援：允許 `{{c1::}}` 和 `{{c2::}}` 並存
