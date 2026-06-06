@@ -32,12 +32,28 @@ function buildCardRows(cards: GeneratedCards, deckName: string): string[] {
   const lines: string[] = [];
 
   for (const c of cards.vocab) {
-    const hint = [
-      ROLE_PREFIX,
-      `書名：${deckName}`,
-      `請為英文單字「${c.word}」提供繁體中文定義，限25字內；若有多個詞性請選最符合例句語意的那個。`,
-      `參考例句：${c.exampleFromText}`,
-    ].join('\n');
+    let hint: string;
+    if (c.extraExamples && c.extraExamples.length > 0) {
+      const allExamples = [c.exampleFromText, ...c.extraExamples]
+        .map((ex, i) => `例句 ${i + 1}：${ex}`)
+        .join('\n');
+      hint = [
+        ROLE_PREFIX,
+        `書名：${deckName}`,
+        `此單字「${c.word}」出現於多個段落，有以下 ${c.extraExamples.length + 1} 個例句，請選出語境最清晰、最適合語言學習的一句，再提供繁體中文定義（限25字）。`,
+        allExamples,
+        `回傳格式（共兩行，不加其他說明）：`,
+        `第一行：選用的例句（完整原文，勿修改）`,
+        `第二行：繁體中文定義`,
+      ].join('\n');
+    } else {
+      hint = [
+        ROLE_PREFIX,
+        `書名：${deckName}`,
+        `請為英文單字「${c.word}」提供繁體中文定義，限25字內；若有多個詞性請選最符合例句語意的那個。`,
+        `參考例句：${c.exampleFromText}`,
+      ].join('\n');
+    }
     lines.push(row(['vocab', deckName, c.word, c.definition_zh, c.exampleFromText, '', '', '', '', '', '', hint]));
   }
 

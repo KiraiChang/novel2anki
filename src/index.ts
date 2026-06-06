@@ -218,6 +218,30 @@ program
       }
     }
 
+    // 全域詞彙卡去重：同字保留最長例句為主，其餘存入 extraExamples 供 ai_hint 使用
+    if (requestedTypes.includes('vocab')) {
+      const vocabExamples = new Map<string, string[]>();
+      for (const { cards } of chunkResults) {
+        for (const v of cards.vocab) {
+          const list = vocabExamples.get(v.word) ?? [];
+          if (!list.includes(v.exampleFromText)) list.push(v.exampleFromText);
+          vocabExamples.set(v.word, list);
+        }
+      }
+      const seenVocab = new Set<string>();
+      chunkResults.forEach(({ cards }) => {
+        cards.vocab = cards.vocab.filter(v => {
+          if (seenVocab.has(v.word)) return false;
+          seenVocab.add(v.word);
+          const all = [...(vocabExamples.get(v.word) ?? [])].sort((a, b) => b.length - a.length);
+          v.exampleFromText = all[0];
+          if (all.length > 1) v.extraExamples = all.slice(1);
+          return true;
+        });
+      });
+      allCards.vocab = chunkResults.flatMap(({ cards }) => cards.vocab);
+    }
+
     // 全域人物卡去重：NLP 後、匯出前，保留全書中 firstMention 分數最高的那張
     if (requestedTypes.includes('character')) {
       const bestChunk = new Map<string, { score: number; idx: number }>();

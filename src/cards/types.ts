@@ -9,6 +9,7 @@ export interface VocabCard {
   word: string;
   definition_zh: string;
   exampleFromText: string;
+  extraExamples?: string[]; // 同字跨段落的備選例句，供 ai_hint 使用
 }
 
 export interface ClozeCard {
