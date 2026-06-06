@@ -3,7 +3,7 @@ import { CardTypes } from './generator';
 import { EnrichedChunk } from '../nlp/types';
 import { STOP_WORDS } from '../nlp/stopWords';
 
-// 版權聲明、出版資訊、網址等非故事內容的特徵
+// 版權聲明、出版資訊、章節標題、網址等非故事內容的特徵
 const NON_STORY_PATTERNS: RegExp[] = [
   /copyright/i,
   /all rights reserved/i,
@@ -16,6 +16,8 @@ const NON_STORY_PATTERNS: RegExp[] = [
   /©/,
   /https?:\/\//,
   /www\.[a-z]/i,
+  // 章節／段落標題（CHAPTER 1、PART TWO、PROLOGUE 等）
+  /^(CHAPTER|PART|PROLOGUE|EPILOGUE|APPENDIX|INTERLUDE)\b/i,
   // 句首大量數字（頁碼、年份區塊）
   /^\d[\d\s,.\-–—]{4,}/,
 ];
@@ -105,13 +107,22 @@ function mockCharacter(chunk: EnrichedChunk): CharacterCard[] {
     .filter((c): c is CharacterCard => c !== null);
 }
 
+function buildPlotQuestion(chunk: EnrichedChunk, sentences: string[]): string {
+  const storyText = sentences.join(' ');
+  const names = extractCapitalizedNames(storyText).slice(0, 2);
+  const chapterTag = chunk.chapter ? `【${chunk.chapter}】` : '';
+  const namePart = names.length > 0 ? `涉及 ${names.join('、')}，` : '';
+  const opening = sentences[0] ? `段落開頭：「${sentences[0].slice(0, 60)}…」` : '';
+  return `${chapterTag}${namePart}${opening}\n這段場景發生了什麼事？請用繁體中文摘要。`;
+}
+
 function mockPlot(chunk: EnrichedChunk): PlotCard[] {
   const sentences = extractSentences(chunk.text);
   const sourceText = sentences.slice(0, 5).join(' ');
   if (!sourceText) return [];
   return [{
     type: 'plot' as const,
-    question_zh: `這個段落${chunk.chapter ? `（${chunk.chapter}）` : ''}主要描述了什麼？`,
+    question_zh: buildPlotQuestion(chunk, sentences),
     answer_zh: sourceText,
   }];
 }
