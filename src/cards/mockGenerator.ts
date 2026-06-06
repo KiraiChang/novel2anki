@@ -3,11 +3,32 @@ import { CardTypes } from './generator';
 import { EnrichedChunk } from '../nlp/types';
 import { STOP_WORDS } from '../nlp/stopWords';
 
+// 版權聲明、出版資訊、網址等非故事內容的特徵
+const NON_STORY_PATTERNS: RegExp[] = [
+  /copyright/i,
+  /all rights reserved/i,
+  /\bisbn[-‐\s]?\d/i,
+  /published by/i,
+  /first published/i,
+  /printed in/i,
+  /no part of this/i,
+  /reproduction.*prohibited/i,
+  /©/,
+  /https?:\/\//,
+  /www\.[a-z]/i,
+  // 句首大量數字（頁碼、年份區塊）
+  /^\d[\d\s,.\-–—]{4,}/,
+];
+
+function isStorySentence(s: string): boolean {
+  return !NON_STORY_PATTERNS.some(re => re.test(s));
+}
+
 function extractSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
-    .filter(s => s.length > 30 && s.length < 200);
+    .filter(s => s.length > 30 && s.length < 200 && isStorySentence(s));
 }
 
 function findSentenceWith(word: string, sentences: string[]): string | undefined {
@@ -31,9 +52,10 @@ function mockVocab(chunk: EnrichedChunk): VocabCard[] {
   const suggestions = chunk.nlp.vocabSuggestions;
   const sentences = extractSentences(chunk.text);
 
+  const storyText = sentences.join(' ');
   const words = suggestions.length > 0
     ? suggestions.slice(0, 4).map(s => s.original)
-    : extractLongWords(chunk.text).slice(0, 4);
+    : extractLongWords(storyText).slice(0, 4);
 
   return words.map(word => ({
     type: 'vocab' as const,
