@@ -62,17 +62,29 @@ npx ts-node src/index.ts novel.epub --mock
 ## 專案結構
 
 ```
-src/
-├── pdf/extractor.ts       # PDF 文字擷取與分段
-├── epub/extractor.ts      # EPUB 章節擷取與分段
-├── cards/
-│   ├── types.ts           # TypeScript 型別定義
-│   ├── generator.ts       # Claude API 字卡生成（含 prompt caching）
-│   ├── mockGenerator.ts   # Mock 模式字卡生成（不用 API）
-│   └── templates.ts       # Anki HTML / CSS 模板
-├── anki/exporter.ts       # .apkg 匯出（SQLite + zip）
-└── index.ts               # CLI 入口
-output/                    # 產生的 .apkg 儲存位置
+novel2anki/
+├── src/
+│   ├── index.ts                  # CLI 入口
+│   ├── pdf/
+│   │   └── extractor.ts          # PDF 文字擷取與分段
+│   ├── epub/
+│   │   └── extractor.ts          # EPUB 章節擷取與分段
+│   ├── cards/
+│   │   ├── types.ts              # TypeScript 型別定義
+│   │   ├── generator.ts          # Claude API 字卡生成（含 prompt caching）
+│   │   ├── mockGenerator.ts      # Mock 模式字卡生成（不用 API）
+│   │   └── templates.ts          # Anki HTML / CSS 模板
+│   ├── anki/
+│   │   └── exporter.ts           # .apkg 匯出（SQLite + zip）
+│   └── html/
+│       └── exporter.ts           # HTML 預覽頁匯出
+├── docs/                         # 專案文件（見「專案文件」章節）
+│   └── mock/                     # Mock 模式子模組文件
+├── book/                         # 測試用書籍存放位置
+├── output/                       # 產生的 .apkg / .html 儲存位置
+├── CLAUDE.md                     # 專案說明與協作規範
+├── package.json
+└── tsconfig.json
 ```
 
 ## 輸出語言
