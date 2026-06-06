@@ -19,7 +19,7 @@
 ---
 
 ### [STEP-005] 讀書導向字卡模式（`--reading`）
-**狀態**：進行中
+**狀態**：已完成
 **目標**：新增 `--reading` 旗標，產出以「讀懂本書」為目標的字卡（術語、因果、章節理解、主題意象），支援 `--mock`、Claude API、`--offline` 三種處理方式，現有流程不受影響。
 
 1. [x] 建立 `src/cards/readingTypes.ts`（`ReadingCards` 型別 + 四種子卡片介面）
@@ -27,8 +27,8 @@
 3. [x] 修改 `src/index.ts`（新增 `--reading` 旗標 + 路由至 reading 生成器）
 4. [x] 建立 `src/csv/readingExporter.ts`（`ReadingCards` CSV 匯出 + ai_hint）
 5. [x] 建立 `src/html/readingExporter.ts`（reading 卡片 HTML，四區塊互動）
-6. [ ] 建立 `src/cards/readingGenerator.ts`（Claude API reading prompts）
-7. [ ] 建立 `src/cards/readingOfflineGenerator.ts`（Ollama reading prompts）
+6. [x] 建立 `src/cards/readingGenerator.ts`（Claude API reading prompts）
+7. [x] 建立 `src/cards/readingOfflineGenerator.ts`（Ollama reading prompts）
 
 **備注**：
 - Reading 卡片複用 `VocabCard`/`PlotCard`/`CharacterCard` 型別，不動 APKG/CSV 匯出管線骨架

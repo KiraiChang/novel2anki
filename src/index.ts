@@ -8,6 +8,8 @@ import { extractChunks as extractEpub } from './epub/extractor';
 import { generateCards, CardTypes } from './cards/generator';
 import { generateMockCards } from './cards/mockGenerator';
 import { generateReadingMockCards } from './cards/readingMockGenerator';
+import { generateReadingCards } from './cards/readingGenerator';
+import { generateReadingOfflineCards } from './cards/readingOfflineGenerator';
 import { exportReadingToCsv } from './csv/readingExporter';
 import { exportReadingToHtml } from './html/readingExporter';
 import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards/offlineGenerator';
@@ -195,9 +197,44 @@ program
         console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
         console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
         console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      } else if (options.offline) {
+        console.log(chalk.yellow(`正在分析書籍內容（讀書理解模式 × Ollama ${ollamaConfig!.model}）...`));
+        const readingCards = await generateReadingOfflineCards(enrichedChunks, deckName, ollamaConfig!);
+        const total = readingCards.terms.length + readingCards.causes.length +
+          readingCards.chapters.length + readingCards.themes.length;
+        console.log('');
+        console.log(chalk.cyan('讀書理解字卡統計：'));
+        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
+        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
+        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
+        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
+        console.log(chalk.bold(`  合計：       ${total} 張`));
+        console.log('');
+        console.log(chalk.yellow('正在匯出檔案...'));
+        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
+        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
       } else {
-        console.log(chalk.red('錯誤：--reading 目前僅支援 --mock 模式，Claude API / Offline 版本開發中。'));
-        process.exit(1);
+        console.log(chalk.yellow('正在分析書籍內容（讀書理解模式 × Claude API）...'));
+        const readingCards = await generateReadingCards(enrichedChunks, deckName);
+        const total = readingCards.terms.length + readingCards.causes.length +
+          readingCards.chapters.length + readingCards.themes.length;
+        console.log('');
+        console.log(chalk.cyan('讀書理解字卡統計：'));
+        console.log(`  術語卡：     ${readingCards.terms.length} 張`);
+        console.log(`  因果事件卡： ${readingCards.causes.length} 張`);
+        console.log(`  章節脈絡卡： ${readingCards.chapters.length} 張`);
+        console.log(`  主題意象卡： ${readingCards.themes.length} 張`);
+        console.log(chalk.bold(`  合計：       ${total} 張`));
+        console.log('');
+        console.log(chalk.yellow('正在匯出檔案...'));
+        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
+        const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
       }
       console.log('');
       console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
