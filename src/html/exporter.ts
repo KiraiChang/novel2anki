@@ -23,7 +23,7 @@ function vocabSection(cards: VocabCard[]): string {
       <div class="definition">${escapHtml(c.definition_zh)}</div>
       <div class="example">${escapHtml(c.exampleFromText)}</div>
     </div>`).join('');
-  return `<section><h2>📚 詞彙卡（${cards.length} 張）</h2>${rows}</section>`;
+  return `<section id="vocab"><h2>📚 詞彙卡（${cards.length} 張）</h2>${rows}</section>`;
 }
 
 function clozeSection(cards: ClozeCard[]): string {
@@ -33,7 +33,7 @@ function clozeSection(cards: ClozeCard[]): string {
       <div class="cloze-text">${renderCloze(c.text)}</div>
       <div class="hint">提示：${escapHtml(c.hint_zh)}</div>
     </div>`).join('');
-  return `<section><h2>✏️ 克漏字（${cards.length} 張）</h2>${rows}</section>`;
+  return `<section id="cloze"><h2>✏️ 克漏字（${cards.length} 張）</h2>${rows}</section>`;
 }
 
 function characterSection(cards: CharacterCard[]): string {
@@ -44,7 +44,7 @@ function characterSection(cards: CharacterCard[]): string {
       <div class="first-mention">${escapHtml(c.firstMention)}</div>
       <div class="description">${escapHtml(c.description_zh)}</div>
     </div>`).join('');
-  return `<section><h2>🧑 人物概念卡（${cards.length} 張）</h2>${rows}</section>`;
+  return `<section id="character"><h2>🧑 人物概念卡（${cards.length} 張）</h2>${rows}</section>`;
 }
 
 function plotSection(cards: PlotCard[]): string {
@@ -54,11 +54,25 @@ function plotSection(cards: PlotCard[]): string {
       <div class="plot-q">${escapHtml(c.question_zh)}</div>
       <div class="plot-a">${escapHtml(c.answer_zh)}</div>
     </div>`).join('');
-  return `<section><h2>📖 情節問答（${cards.length} 張）</h2>${rows}</section>`;
+  return `<section id="plot"><h2>📖 情節問答（${cards.length} 張）</h2>${rows}</section>`;
+}
+
+function buildStatLinks(cards: GeneratedCards): string {
+  const items: Array<{ id: string; label: string; count: number }> = [
+    { id: 'vocab',     label: '📚 詞彙',  count: cards.vocab.length },
+    { id: 'cloze',     label: '✏️ 克漏字', count: cards.cloze.length },
+    { id: 'character', label: '🧑 人物',   count: cards.character.length },
+    { id: 'plot',      label: '📖 情節',   count: cards.plot.length },
+  ];
+  const total = items.reduce((s, i) => s + i.count, 0);
+  const links = items
+    .filter(i => i.count > 0)
+    .map(i => `<a class="stat" href="#${i.id}">${i.label} ${i.count}</a>`)
+    .join('');
+  return links + `<span class="stat stat-total">合計 ${total} 張</span>`;
 }
 
 function buildHtml(cards: GeneratedCards, deckName: string): string {
-  const total = cards.vocab.length + cards.cloze.length + cards.character.length + cards.plot.length;
   const generated = new Date().toLocaleString('zh-TW', { hour12: false });
 
   return `<!DOCTYPE html>
@@ -69,6 +83,7 @@ function buildHtml(cards: GeneratedCards, deckName: string): string {
 <title>${escapHtml(deckName)} — novel2anki 預覽</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
   body {
     font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
     font-size: 15px; line-height: 1.7; background: #f5f6fa; color: #2c3e50;
@@ -79,8 +94,13 @@ function buildHtml(cards: GeneratedCards, deckName: string): string {
   }
   header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
   .meta { font-size: 13px; opacity: .75; }
-  .stats { display: flex; gap: 20px; margin-top: 10px; flex-wrap: wrap; }
-  .stat { background: rgba(255,255,255,.15); border-radius: 6px; padding: 4px 12px; font-size: 13px; }
+  .stats { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .stat {
+    background: rgba(255,255,255,.15); border-radius: 6px; padding: 4px 12px; font-size: 13px;
+    color: #fff; text-decoration: none; transition: background .15s;
+  }
+  a.stat:hover { background: rgba(255,255,255,.3); }
+  .stat-total { opacity: .7; cursor: default; }
   main { max-width: 860px; margin: 32px auto; padding: 0 16px 64px; }
   section { margin-bottom: 40px; }
   section h2 { font-size: 17px; font-weight: 700; margin-bottom: 14px;
@@ -122,13 +142,7 @@ function buildHtml(cards: GeneratedCards, deckName: string): string {
 <header>
   <h1>${escapHtml(deckName)}</h1>
   <div class="meta">由 novel2anki 產生 · ${generated}</div>
-  <div class="stats">
-    <span class="stat">📚 詞彙 ${cards.vocab.length}</span>
-    <span class="stat">✏️ 克漏字 ${cards.cloze.length}</span>
-    <span class="stat">🧑 人物 ${cards.character.length}</span>
-    <span class="stat">📖 情節 ${cards.plot.length}</span>
-    <span class="stat">合計 ${total} 張</span>
-  </div>
+  <div class="stats">${buildStatLinks(cards)}</div>
 </header>
 <main>
 ${vocabSection(cards.vocab)}
