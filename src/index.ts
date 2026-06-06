@@ -10,7 +10,7 @@ import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml } from './html/exporter';
 import { GeneratedCards } from './cards/types';
-import { runNlpPipeline } from './nlp/pipeline';
+import { runNlpPipeline, processChunk } from './nlp/pipeline';
 import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
 
 const VALID_TYPES: CardTypes[] = ['vocab', 'cloze', 'character', 'plot'];
@@ -76,16 +76,23 @@ program
     if (isFinite(maxChunks)) chunks = chunks.slice(0, maxChunks);
     console.log(chalk.green(`✓ 共切出 ${chunks.length} 個段落區塊`));
 
-    // NLP 前處理管線
-    console.log(chalk.yellow('正在執行 NLP 前處理...'));
-    let enrichedChunks: EnrichedChunk[];
-    try {
-      enrichedChunks = runNlpPipeline(chunks);
-      const totalSuggestions = enrichedChunks.reduce((s, c) => s + c.nlp.vocabSuggestions.length, 0);
-      console.log(chalk.green(`✓ NLP 完成，共識別 ${totalSuggestions} 個建議詞彙`));
-    } catch (err) {
-      console.log(chalk.yellow(`⚠ NLP 管線失敗，以原始模式繼續：${(err as Error).message}`));
-      enrichedChunks = chunks.map(c => ({ ...c, nlp: EMPTY_CHUNK_NLP }));
+    // NLP 前處理管線（逐段落顯示進度）
+    const enrichedChunks: EnrichedChunk[] = [];
+    let nlpFailed = false;
+    for (let i = 0; i < chunks.length; i++) {
+      process.stdout.write(chalk.yellow(`\r正在執行 NLP 前處理... 段落 ${i + 1}/${chunks.length}`));
+      try {
+        enrichedChunks.push({ ...chunks[i], nlp: processChunk(chunks[i]) });
+      } catch {
+        enrichedChunks.push({ ...chunks[i], nlp: EMPTY_CHUNK_NLP });
+        nlpFailed = true;
+      }
+    }
+    const totalSuggestions = enrichedChunks.reduce((s, c) => s + c.nlp.vocabSuggestions.length, 0);
+    if (nlpFailed) {
+      process.stdout.write(`\r${chalk.yellow(`⚠ NLP 前處理部分失敗，共識別 ${totalSuggestions} 個建議詞彙`)}\n`);
+    } else {
+      process.stdout.write(`\r${chalk.green(`✓ NLP 前處理完成（${chunks.length} 段落），共識別 ${totalSuggestions} 個建議詞彙`)}\n`);
     }
     console.log('');
 
