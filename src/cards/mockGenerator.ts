@@ -10,6 +10,11 @@ function extractSentences(text: string): string[] {
     .filter(s => s.length > 30 && s.length < 200);
 }
 
+function findSentenceWith(word: string, sentences: string[]): string | undefined {
+  const lower = word.toLowerCase();
+  return sentences.find(s => s.toLowerCase().includes(lower));
+}
+
 function extractLongWords(text: string): string[] {
   const words = text.toLowerCase().match(/\b[a-z]{7,}\b/g) ?? [];
   const unique = [...new Set(words)].filter(w => !STOP_WORDS.has(w));
@@ -30,11 +35,11 @@ function mockVocab(chunk: EnrichedChunk): VocabCard[] {
     ? suggestions.slice(0, 4).map(s => s.original)
     : extractLongWords(chunk.text).slice(0, 4);
 
-  return words.map((word, i) => ({
+  return words.map(word => ({
     type: 'vocab' as const,
     word,
     definition_zh: `【模擬】「${word}」的繁體中文定義（請以 API 模式重新產生）`,
-    exampleFromText: sentences[i % Math.max(sentences.length, 1)] ?? chunk.text.slice(0, 100),
+    exampleFromText: findSentenceWith(word, sentences) ?? chunk.text.slice(0, 200),
   }));
 }
 
