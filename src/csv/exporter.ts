@@ -45,7 +45,7 @@ export function exportToCsv(cards: GeneratedCards, deckName: string, outputDir: 
   }
 
   for (const c of cards.plot) {
-    const hint = `請根據小說段落回答：${c.question_zh}`;
+    const hint = `請用繁體中文回答以下問題，並將 answer_zh 欄的英文原文替換為摘要答案。\n問題：${c.question_zh}\n段落原文：${c.answer_zh}`;
     lines.push(row([
       'plot', '', '', '', '', '', '', '', '',
       c.question_zh, c.answer_zh, hint,

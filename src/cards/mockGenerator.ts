@@ -81,23 +81,26 @@ function mockCloze(chunk: EnrichedChunk): ClozeCard[] {
 }
 
 function mockCharacter(chunk: EnrichedChunk): CharacterCard[] {
-  const names = extractCapitalizedNames(chunk.text).slice(0, 2);
   const sentences = extractSentences(chunk.text);
-  return names.map((name, i) => ({
-    type: 'character' as const,
-    name,
-    description_zh: '',
-    firstMention: sentences.find(s => s.includes(name)) ?? chunk.text.slice(0, 100),
-  }));
+  const storyText = sentences.join(' ');
+  const names = extractCapitalizedNames(storyText).slice(0, 2);
+  return names
+    .map(name => {
+      const firstMention = sentences.find(s => s.includes(name));
+      if (!firstMention) return null;
+      return { type: 'character' as const, name, description_zh: '', firstMention };
+    })
+    .filter((c): c is CharacterCard => c !== null);
 }
 
 function mockPlot(chunk: EnrichedChunk): PlotCard[] {
   const sentences = extractSentences(chunk.text);
-  const summary = sentences.slice(0, 3).join(' ');
+  const sourceText = sentences.slice(0, 5).join(' ');
+  if (!sourceText) return [];
   return [{
     type: 'plot' as const,
     question_zh: `這個段落${chunk.chapter ? `（${chunk.chapter}）` : ''}主要描述了什麼？`,
-    answer_zh: '',
+    answer_zh: sourceText,
   }];
 }
 
