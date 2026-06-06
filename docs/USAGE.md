@@ -185,7 +185,22 @@ npx ts-node src/index.ts novel.epub --reading
 
 # Ollama 離線模式
 npx ts-node src/index.ts novel.epub --reading --offline
+
+# 依卡片類型切割為 4 個 CSV（術語 / 因果 / 章節 / 主題），方便分批 AI 處理
+npx ts-node src/index.ts novel.epub --reading --mock --split-chapters
+
+# 切割 + 單字卡 HTML 三合一
+npx ts-node src/index.ts novel.epub --reading --mock --split-chapters --flash
 ```
+
+`--split-chapters` 搭配 `--reading` 輸出：
+```
+output/{deck}-reading-ch-01-terms.csv      # 全書術語卡
+output/{deck}-reading-ch-02-causes.csv     # 因果事件卡
+output/{deck}-reading-ch-03-chapters.csv   # 章節脈絡卡（每章一行）
+output/{deck}-reading-ch-04-themes.csv     # 主題意象卡
+```
+填入後整目錄打包：`npx ts-node src/index.ts output/ -d "My Novel"`
 
 ## 單字卡 HTML（`--flash`）
 

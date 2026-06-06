@@ -10,7 +10,7 @@ import { generateMockCards } from './cards/mockGenerator';
 import { generateReadingMockCards } from './cards/readingMockGenerator';
 import { generateReadingCards } from './cards/readingGenerator';
 import { generateReadingOfflineCards } from './cards/readingOfflineGenerator';
-import { exportReadingToCsv } from './csv/readingExporter';
+import { exportReadingToCsv, exportReadingToCsvSplits } from './csv/readingExporter';
 import { exportReadingToHtml } from './html/readingExporter';
 import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards/offlineGenerator';
 import { generateDeepLCards } from './cards/deeplGenerator';
@@ -207,15 +207,22 @@ program
       console.log(chalk.bold(`  合計：       ${total} 張`));
       console.log('');
       console.log(chalk.yellow('正在匯出檔案...'));
-      const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
       const htmlPath = exportReadingToHtml(readingCards, deckName, options.output);
-      console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
       console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
       if (options.flash) {
         const flashPath = exportReadingToFlashHtml(readingCards, deckName, options.output);
         console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
       }
-      console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      if (options.splitChapters) {
+        const csvPaths = exportReadingToCsvSplits(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 分割：   ${csvPaths.length} 個檔案`));
+        csvPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${options.output} -d "${deckName}")`));
+      } else {
+        const csvPath = exportReadingToCsv(readingCards, deckName, options.output);
+        console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+        console.log(chalk.gray(`  (填入後可執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+      }
       console.log('');
       console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
       return;
