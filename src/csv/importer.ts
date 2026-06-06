@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { GeneratedCards } from '../cards/types';
+import { scoreMention } from './exporter';
 
 function parseRow(line: string): string[] {
   const fields: string[] = [];
@@ -96,12 +97,6 @@ export function resolveCsvPaths(input: string): string[] {
   }
 
   return [input];
-}
-
-function scoreMention(mention: string): number {
-  const contentWords = (mention.match(/\b[a-zA-Z]{4,}\b/g) ?? []).length;
-  const hasRelativeClause = /\b(who|which|whose)\b/i.test(mention);
-  return contentWords + (hasRelativeClause ? 5 : 0);
 }
 
 export function importFromCsvFiles(paths: string[]): GeneratedCards {

@@ -12,7 +12,7 @@ import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToComparisonHtml } from './html/exporter';
-import { exportToCsv, exportToCsvSplits, ChunkResult } from './csv/exporter';
+import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv/exporter';
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
@@ -216,6 +216,22 @@ program
       } catch (err) {
         console.log(chalk.red(` ✗ 失敗：${(err as Error).message}`));
       }
+    }
+
+    // 全域人物卡去重：NLP 後、匯出前，保留全書中 firstMention 分數最高的那張
+    if (requestedTypes.includes('character')) {
+      const bestChunk = new Map<string, { score: number; idx: number }>();
+      chunkResults.forEach(({ cards }, idx) => {
+        for (const c of cards.character) {
+          const score = scoreMention(c.firstMention);
+          const cur = bestChunk.get(c.name);
+          if (!cur || score > cur.score) bestChunk.set(c.name, { score, idx });
+        }
+      });
+      chunkResults.forEach(({ cards }, idx) => {
+        cards.character = cards.character.filter(c => bestChunk.get(c.name)?.idx === idx);
+      });
+      allCards.character = chunkResults.flatMap(({ cards }) => cards.character);
     }
 
     const total = allCards.vocab.length + allCards.cloze.length + allCards.character.length + allCards.plot.length;

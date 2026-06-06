@@ -79,7 +79,7 @@ function writeCsv(filePath: string, cardLines: string[]): void {
   fs.writeFileSync(filePath, [row(HEADERS), ...cardLines].join('\n'), 'utf-8');
 }
 
-function scoreMention(mention: string): number {
+export function scoreMention(mention: string): number {
   const contentWords = (mention.match(/\b[a-zA-Z]{4,}\b/g) ?? []).length;
   const hasRelativeClause = /\b(who|which|whose)\b/i.test(mention);
   return contentWords + (hasRelativeClause ? 5 : 0);
