@@ -60,7 +60,7 @@ function mockVocab(chunk: EnrichedChunk): VocabCard[] {
   return words.map(word => ({
     type: 'vocab' as const,
     word,
-    definition_zh: `【模擬】「${word}」的繁體中文定義（請以 API 模式重新產生）`,
+    definition_zh: '',
     exampleFromText: findSentenceWith(word, sentences) ?? chunk.text.slice(0, 200),
   }));
 }
@@ -75,7 +75,7 @@ function mockCloze(chunk: EnrichedChunk): ClozeCard[] {
     return {
       type: 'cloze' as const,
       text: cloze,
-      hint_zh: `【模擬】填入適當的英文單字`,
+      hint_zh: '',
     };
   });
 }
@@ -86,7 +86,7 @@ function mockCharacter(chunk: EnrichedChunk): CharacterCard[] {
   return names.map((name, i) => ({
     type: 'character' as const,
     name,
-    description_zh: `【模擬】「${name}」是本段落中出現的人物或地點（請以 API 模式重新產生完整描述）`,
+    description_zh: '',
     firstMention: sentences.find(s => s.includes(name)) ?? chunk.text.slice(0, 100),
   }));
 }
@@ -96,8 +96,8 @@ function mockPlot(chunk: EnrichedChunk): PlotCard[] {
   const summary = sentences.slice(0, 3).join(' ');
   return [{
     type: 'plot' as const,
-    question_zh: `【模擬】這個段落${chunk.chapter ? `（${chunk.chapter}）` : ''}主要描述了什麼？`,
-    answer_zh: `【模擬】重點摘要：${summary.slice(0, 150)}...（請以 API 模式重新產生完整摘要）`,
+    question_zh: `這個段落${chunk.chapter ? `（${chunk.chapter}）` : ''}主要描述了什麼？`,
+    answer_zh: '',
   }];
 }
 

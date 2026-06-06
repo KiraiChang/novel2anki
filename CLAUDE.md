@@ -2,70 +2,9 @@
 
 從英文 PDF 或 EPUB 小說自動產生有情境關聯的 Anki 字卡。
 
-## 快速開始
+## 使用說明
 
-```bash
-# 1. 設定 API Key
-cp .env.example .env
-# 編輯 .env，填入 ANTHROPIC_API_KEY=sk-ant-...
-
-# 2. 不用 API 先測試整條流程（mock 模式）
-npx ts-node src/index.ts novel.epub --mock --chunks 3
-
-# 3. 正式執行（呼叫 Claude API）
-npx ts-node src/index.ts novel.pdf --chunks 3
-```
-
-## 完整選項
-
-```
-npx ts-node src/index.ts <檔案> [選項]
-
-引數：
-  <檔案>               PDF 或 EPUB 檔案路徑
-
-選項：
-  -d, --deck <名稱>    牌組名稱（預設：檔名）
-  -t, --types <類型>   字卡類型，逗號分隔（預設：全部）
-                       可選值：vocab, cloze, character, plot
-  -c, --chunks <數量>  最多處理幾個段落區塊（預設：全部）
-  -o, --output <目錄>  .apkg 輸出目錄（預設：./output）
-  --mock               模擬模式：不呼叫 API，用文字分析產生測試字卡
-  --offline            離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）
-  --model <模型名稱>   指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL）
-```
-
-## 使用範例
-
-```bash
-# EPUB 小說，只產生詞彙卡和克漏字
-npx ts-node src/index.ts novel.epub --types vocab,cloze
-
-# PDF，指定牌組名稱，處理前 5 個區塊
-npx ts-node src/index.ts novel.pdf --deck "Pride and Prejudice" --chunks 5
-
-# Mock 模式測試，不花 API 費用
-npx ts-node src/index.ts novel.epub --mock
-
-# 離線模式（需先執行 ollama serve 並 ollama pull llama3.2）
-npx ts-node src/index.ts novel.epub --offline --chunks 3
-
-# 離線模式，自訂模型
-npx ts-node src/index.ts novel.epub --offline --model gemma3 --chunks 3
-```
-
-## 字卡類型
-
-| 類型 | 說明 | Anki 模型 |
-|------|------|-----------|
-| `vocab` | 英文單字 → 繁中定義 + 原文例句 | Basic |
-| `cloze` | 關鍵片語挖空填充 | Cloze |
-| `character` | 人物／地點／概念介紹 | Basic |
-| `plot` | 情節理解問答（正反兩面） | Basic + Reversed |
-
-## 匯入 Anki
-
-執行後在 `output/` 目錄取得 `.apkg` 檔案，開啟 Anki → **檔案 → 匯入** 即可。
+詳見 [docs/USAGE.md](docs/USAGE.md)，涵蓋完整選項、使用範例、Mock → CSV → APKG 工作流程、字卡類型說明。
 
 ## 專案結構
 
@@ -84,9 +23,13 @@ novel2anki/
 │   │   └── templates.ts          # Anki HTML / CSS 模板
 │   ├── anki/
 │   │   └── exporter.ts           # .apkg 匯出（SQLite + zip）
+│   ├── csv/
+│   │   ├── exporter.ts           # CSV 匯出（含 ai_hint 提示詞欄）
+│   │   └── importer.ts           # CSV 解析 → GeneratedCards
 │   └── html/
 │       └── exporter.ts           # HTML 預覽頁匯出
 ├── docs/                         # 專案文件（見「專案文件」章節）
+│   ├── USAGE.md                  # 完整使用說明
 │   └── mock/                     # Mock 模式子模組文件
 ├── book/                         # 測試用書籍存放位置
 ├── output/                       # 產生的 .apkg / .html 儲存位置
@@ -124,6 +67,7 @@ novel2anki/
 
 ```
 docs/
+├── USAGE.md          # 完整使用說明（選項、範例、CSV 工作流程）
 ├── ARCHITECTURE.md   # 系統架構、資料流、模組職責、核心型別、相依套件
 ├── TODOS.md          # 待實作功能清單（checkbox）
 ├── ISSUES.md         # 已知問題與潛在風險

@@ -10,8 +10,10 @@
 ```
 CLI 輸入
   │
-  ├─ .pdf → src/pdf/extractor.ts  → Chunk[]
-  └─ .epub → src/epub/extractor.ts → Chunk[]
+  ├─ .csv → src/csv/importer.ts → GeneratedCards ──────────────────────────────┐
+  │                                                                              │
+  ├─ .pdf → src/pdf/extractor.ts  → Chunk[]                                     │
+  └─ .epub → src/epub/extractor.ts → Chunk[]                                    │
                    │
                    ▼
          NLP 前處理管線（全模式）
@@ -38,17 +40,21 @@ mockGenerator  offlineGenerator  generator.ts
            GeneratedCards 合併
                    │
                    ▼
-        ┌──────────────────────────────┐
-        │  src/anki/exporter.ts        │
-        │  （SQLite → ZIP → .apkg）    │
-        ├──────────────────────────────┤
-        │  src/html/exporter.ts        │
-        │  （GeneratedCards → .html）  │
-        └──────────────────────────────┘
+        ┌──────────────────────────────────────────┐ ←──────────────────────┘
+        │  src/anki/exporter.ts                    │
+        │  （SQLite → ZIP → .apkg）                │
+        ├──────────────────────────────────────────┤
+        │  src/html/exporter.ts                    │
+        │  （GeneratedCards → .html）              │
+        ├──────────────────────────────────────────┤
+        │  src/csv/exporter.ts（mock 模式限定）     │
+        │  （GeneratedCards → .csv + ai_hint 欄）  │
+        └──────────────────────────────────────────┘
                    │
                    ▼
            ./output/{deckName}.apkg
            ./output/{deckName}.html
+           ./output/{deckName}.csv  ← mock 模式時額外產生
 ```
 
 ## 模組職責
@@ -69,6 +75,8 @@ mockGenerator  offlineGenerator  generator.ts
 | 卡片模板 | `src/cards/templates.ts` | Anki HTML/CSS 模板常數 |
 | Anki 匯出器 | `src/anki/exporter.ts` | SQLite 建構、ZIP 打包、.apkg 輸出 |
 | HTML 匯出器 | `src/html/exporter.ts` | GeneratedCards → 自含式 HTML 預覽頁 |
+| CSV 匯出器 | `src/csv/exporter.ts` | GeneratedCards → 12 欄 CSV（含 ai_hint 提示詞），mock 模式時自動產生 |
+| CSV 匯入器 | `src/csv/importer.ts` | 12 欄 CSV → GeneratedCards，供直接匯出 .apkg / .html |
 
 ## 核心型別
 

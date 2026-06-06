@@ -12,6 +12,8 @@ import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToComparisonHtml } from './html/exporter';
+import { exportToCsv } from './csv/exporter';
+import { importFromCsv } from './csv/importer';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
 import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
@@ -76,10 +78,32 @@ program
     console.log('');
 
     const ext = path.extname(pdfFile).toLowerCase();
-    const supportedExts = ['.pdf', '.epub'];
+    const supportedExts = ['.pdf', '.epub', '.csv'];
     if (!supportedExts.includes(ext)) {
-      console.error(chalk.red(`錯誤：不支援的檔案格式「${ext}」，目前支援：pdf、epub`));
+      console.error(chalk.red(`錯誤：不支援的檔案格式「${ext}」，目前支援：pdf、epub、csv`));
       process.exit(1);
+    }
+
+    // CSV 輸入模式：直接解析 CSV 並匯出，跳過提取與生成步驟
+    if (ext === '.csv') {
+      console.log(chalk.yellow(`正在讀取 CSV...`));
+      const csvCards = importFromCsv(pdfFile);
+      const total = csvCards.vocab.length + csvCards.cloze.length + csvCards.character.length + csvCards.plot.length;
+      console.log(chalk.green(`✓ 共讀取 ${total} 張卡片（詞彙 ${csvCards.vocab.length}、克漏字 ${csvCards.cloze.length}、人物 ${csvCards.character.length}、情節 ${csvCards.plot.length}）`));
+      if (total === 0) {
+        console.error(chalk.red('錯誤：CSV 中沒有可用的卡片資料。'));
+        process.exit(1);
+      }
+      console.log('');
+      console.log(chalk.yellow('正在匯出檔案...'));
+      const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+      const htmlPath = exportToHtml(csvCards, deckName, options.output);
+      console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
+      console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+      console.log('');
+      console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
+      console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
+      return;
     }
 
     console.log(chalk.yellow(`正在讀取 ${ext.slice(1).toUpperCase()}...`));
@@ -199,6 +223,12 @@ program
     const htmlPath = exportToHtml(allCards, deckName, options.output);
     console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
     console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+
+    if (options.mock) {
+      const csvPath = exportToCsv(allCards, deckName, options.output);
+      console.log(chalk.green(`✓ CSV 資料：   ${csvPath}`));
+      console.log(chalk.gray(`  (可編輯後執行: npx ts-node src/index.ts ${csvPath} -d "${deckName}")`));
+    }
 
     if (isCompare) {
       const otherLabel = options.offline ? `Ollama (${ollamaConfig!.model})` : 'Claude API';
