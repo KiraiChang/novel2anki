@@ -3,61 +3,99 @@
 ## 概覽
 
 從英文 PDF / EPUB 小說自動產生 Anki 字卡的 CLI 工具。  
-支援三種生成模式：Claude API（雲端）、Ollama（本地離線）、Mock（規則式測試）。
+支援三種生成模式：Claude API（雲端）、Ollama（本地離線）、Mock（規則式測試）。  
+另有兩種獨立模式：`--reading`（讀書理解）與 `--beginner`（初學者覆蓋率擷取）。
 
 ## 資料流
+
+### 標準字卡模式
 
 ```
 CLI 輸入
   │
   ├─ .csv → src/csv/importer.ts → GeneratedCards ──────────────────────────────┐
+  │  └─ beginner-words.csv → src/csv/beginnerImporter.ts → VocabCard[] ─────────┤
+  │  └─ beginner-tokens.csv → src/csv/beginnerImporter.ts → VocabCard[] ────────┤
   │                                                                              │
   ├─ .pdf → src/pdf/extractor.ts  → Chunk[]                                     │
   └─ .epub → src/epub/extractor.ts → Chunk[]                                    │
                    │
-                   ▼
-         NLP 前處理管線（全模式）
-         src/nlp/pipeline.ts
-         cleanText → tokenize → lemmatize
-         → 詞頻分析 → CEFR 查表
-                   │
-                   ▼
-           EnrichedChunk[]（含 vocabSuggestions）
-                   │
-                   ▼
-           逐 Chunk 處理
-                   │
-       ┌───────────┼───────────┐
-     --mock     --offline    API 模式（預設）
-       │            │            │
-mockGenerator  offlineGenerator  generator.ts
-（vocabSugg   （Ollama fetch，  （Claude 工具呼叫，
-直接選字）     prompt 注入 NLP）  prompt 注入 NLP）
-       │            │            │
-       └────────────┴────────────┘
-                   │
-                   ▼
-           GeneratedCards 合併
-                   │
-                   ▼
-        ┌──────────────────────────────────────────┐ ←──────────────────────┘
-        │  src/anki/exporter.ts                    │
-        │  （SQLite → ZIP → .apkg）                │
-        ├──────────────────────────────────────────┤
-        │  src/html/exporter.ts                    │
-        │  （GeneratedCards → .html）              │
-        ├──────────────────────────────────────────┤
-        │  src/csv/exporter.ts（mock 模式限定）     │
-        │  （GeneratedCards → .csv + ai_hint 欄）  │
+                   ├─ --beginner ──────────────────────────────────────────────────────────┐
+                   │   src/nlp/beginnerExtractor.ts（全書掃描，不走逐 chunk NLP 管線）       │
+                   │   buildGlobalFreqMap → applyBeginnerFilters → rankByCoverage           │
+                   │   → selectBestSentence → WordToken[] + CoverageReport                 │
+                   │                   │                                                   │
+                   │   exportBeginnerTokensToCsv  exportBeginnerWordsToCsv                │
+                   │   （*-beginner-tokens.csv）  （*-beginner-words.csv）                 │
+                   │                                                                       │
+                   ▼                                                                       │
+         NLP 前處理管線（標準模式）                                                          │
+         src/nlp/pipeline.ts                                                               │
+         cleanText → tokenize → lemmatize                                                  │
+         → 詞頻分析 → CEFR 查表                                                            │
+                   │                                                                       │
+                   ▼                                                                       │
+           EnrichedChunk[]（含 vocabSuggestions）                                          │
+                   │                                                                       │
+                   ├─ --reading → src/cards/readingGenerator.ts ────────┐                  │
+                   │             ReadingCards（術語/因果/章節/主題）     │                  │
+                   │                                                    │                  │
+                   ▼                                                    │                  │
+           逐 Chunk 處理                                                │                  │
+                   │                                                    │                  │
+       ┌───────────┼───────────┐                                        │                  │
+     --mock     --offline    API 模式（預設）                            │                  │
+       │            │            │                                      │                  │
+mockGenerator  offlineGenerator  generator.ts                           │                  │
+       │            │            │                                      │                  │
+       └────────────┴────────────┘                                      │                  │
+                   │                                                    │                  │
+                   ▼                                                    │                  │
+           GeneratedCards 合併                                          │                  │
+                   │                                                    │                  │
+                   ▼                                                    ▼                  │
+        ┌──────────────────────────────────────────┐ ←──────────────────┘                 │
+        │  src/anki/exporter.ts  → .apkg           │ ←────────────────────────────────────┘
+        │  src/html/exporter.ts  → .html           │
+        │  src/csv/exporter.ts   → .csv (mock 限定)│
         └──────────────────────────────────────────┘
-                   │
-                   ▼
-           ./output/{deckName}.apkg
-           ./output/{deckName}.html
-           ./output/{deckName}.csv  ← mock 模式時額外產生
+```
+
+### 初學者模式（`--beginner`）資料流
+
+```
+Chunk[]
+  │
+  ▼
+globalFreqAnalyzer.ts  ← 全書詞頻統計（復用 cleanText/tokenize/lemmatize）
+  每個 token 記錄 id=chunk042_sent3_tok7、所在句子
+  │
+  ▼ GlobalFreqMap（含 occurrences 陣列）
+  │
+beginnerFilter.ts  ← 6 條規則過濾，每條記錄 reason 供稽核
+  not-stopword / not-A1 / too-short / not-hapax / alpha-only / content-pos
+  │
+  ▼ kept: GlobalFreqEntry[]  +  rejected: {lemma, reason}[]
+  │
+coverageRanker.ts  ← 按 globalCount 降序排列，計算累積覆蓋率
+  baselineTokens（已知詞：stopwords + A1）納入起始值
+  coverageByCount[i] = 學前 i+1 個字的覆蓋率
+  │
+  ▼ rankedEntries[]  +  coverageByCount[]
+  │
+sentenceScorer.ts  ← 為每個詞從所有出現的句子中選最佳例句
+  評分項：長度 / 目標詞位置 / 完整句 / 引號數量
+  │
+  ▼ WordToken[]（含 id、bestSentence、coverageRank）
+  │
+beginnerExporter.ts
+  ├─ *-beginner-tokens.csv（12 欄，完整元資料 + ai_hint）
+  └─ *-beginner-words.csv（6 欄，精簡翻譯用）
 ```
 
 ## 模組職責
+
+### 標準模式
 
 | 模組 | 路徑 | 職責 |
 |------|------|------|
@@ -67,7 +105,7 @@ mockGenerator  offlineGenerator  generator.ts
 | 型別定義 | `src/cards/types.ts` | Chunk、*Card、GeneratedCards 介面 |
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
 | NLP 管線 | `src/nlp/pipeline.ts` | compromise tokenize → lemma → 詞頻 → CEFR 分級 → EnrichedChunk[] |
-| NLP 型別 | `src/nlp/types.ts` | `EnrichedChunk`、`ChunkNLP`、`VocabSuggestion`、`CefrLevel` |
+| NLP 型別 | `src/nlp/types.ts` | `EnrichedChunk`、`ChunkNLP`、`VocabSuggestion`、`CefrLevel`、`WordToken`、`GlobalFreqEntry` |
 | CEFR 查詢 | `src/nlp/cefrLookup.ts` | `lookupCefrLevel()`、`generateVocabSuggestions()` |
 | NLP 輔助 | `src/nlp/promptHelper.ts` | `buildNlpHint()` — 注入 LLM prompt 的建議詞彙區塊 |
 | 離線生成 | `src/cards/offlineGenerator.ts` | Ollama fetch（循序），零新套件 → 詳見 [offline/ARCHITECTURE.md](offline/ARCHITECTURE.md) |
@@ -78,9 +116,23 @@ mockGenerator  offlineGenerator  generator.ts
 | CSV 匯出器 | `src/csv/exporter.ts` | GeneratedCards → 12 欄 CSV（含 ai_hint 提示詞），mock 模式時自動產生 |
 | CSV 匯入器 | `src/csv/importer.ts` | 12 欄 CSV → GeneratedCards，供直接匯出 .apkg / .html |
 
+### 初學者模式（`--beginner`）
+
+| 模組 | 路徑 | 職責 |
+|------|------|------|
+| 主協調器 | `src/nlp/beginnerExtractor.ts` | 串接全書掃描 → 過濾 → 排序 → 例句選擇，對外單一入口 |
+| 全書詞頻 | `src/nlp/globalFreqAnalyzer.ts` | 跨 Chunk 詞頻統計，記錄每個 token 的 id 與所在句子 |
+| 初學者過濾 | `src/nlp/beginnerFilter.ts` | 6 條規則過濾，每個被排除的詞記錄 reason 供驗證 |
+| 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
+| 例句評分 | `src/nlp/sentenceScorer.ts` | 為每個詞從所有出現句子中選最適合學習的例句 |
+| 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（翻譯用） |
+| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式、匯入 tokens/words → VocabCard[] |
+
 ## 核心型別
 
 ```typescript
+// 基礎卡片
 interface Chunk          { index: number; text: string; chapter?: string }
 interface VocabCard      { type: 'vocab';     word: string; definition_zh: string; exampleFromText: string }
 interface ClozeCard      { type: 'cloze';     text: string; hint_zh: string }
@@ -88,6 +140,28 @@ interface CharacterCard  { type: 'character'; name: string; description_zh: stri
 interface PlotCard       { type: 'plot';      question_zh: string; answer_zh: string }
 interface GeneratedCards { vocab: VocabCard[]; cloze: ClozeCard[]; character: CharacterCard[]; plot: PlotCard[] }
 type CardTypes = 'vocab' | 'cloze' | 'character' | 'plot'
+
+// 初學者模式
+interface WordOccurrence {
+  id: string;          // "chunk042_sent3_tok7"，唯一追蹤碼
+  chunkIndex: number; chapter?: string;
+  sentence: string; sentenceIndex: number; tokenIndex: number;
+}
+interface GlobalFreqEntry {
+  lemma: string; original: string; pos: string;
+  cefrLevel: CefrLevel | 'UNKNOWN';
+  globalCount: number;
+  occurrences: WordOccurrence[];
+}
+interface WordToken {
+  id: string;              // 最佳例句的 occurrence id
+  lemma: string; original: string; pos: string;
+  cefrLevel: CefrLevel | 'UNKNOWN';
+  globalFrequency: number; coverageRank: number;
+  bestSentence: string; bestSentenceScore: number;
+  sourceChunkIndex: number; sourceChapter?: string;
+  definition_zh: string;   // 空字串 → 翻譯後填入
+}
 ```
 
 ## Anki 模型 ID 對照

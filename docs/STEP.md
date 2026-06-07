@@ -18,6 +18,30 @@
 
 ---
 
+### [STEP-006] 初學者覆蓋率單字擷取模式（`--beginner`）
+**狀態**：已完成
+**目標**：為中文母語英文初學者設計「讀完字卡就能閱讀這本小說」的單字擷取方法。以全書詞頻覆蓋率為核心，輸出可獨立翻譯的精簡 CSV，填完翻譯後直接生成 Anki 字卡，不依賴 AI API。
+
+1. [x] 新增 `src/nlp/types.ts` 型別：`WordOccurrence`、`GlobalFreqEntry`、`GlobalFreqMap`、`WordToken`
+2. [x] 建立 `src/nlp/globalFreqAnalyzer.ts`（全書詞頻統計，記錄每個 token 的位置 id 與所在句子）
+3. [x] 建立 `src/nlp/beginnerFilter.ts`（6 條過濾規則，每個被排除詞記錄原因）
+4. [x] 建立 `src/nlp/coverageRanker.ts`（累積覆蓋率排序，含已知詞基準線計算）
+5. [x] 建立 `src/nlp/sentenceScorer.ts`（最佳例句評分：長度 / 詞位置 / 完整句 / 引號數）
+6. [x] 建立 `src/nlp/coverageReport.ts`（覆蓋率報告產生與終端格式化）
+7. [x] 建立 `src/nlp/beginnerExtractor.ts`（主協調器，串接步驟 1–5）
+8. [x] 建立 `src/csv/beginnerExporter.ts`（`exportBeginnerTokensToCsv` + `exportBeginnerWordsToCsv`）
+9. [x] 建立 `src/csv/beginnerImporter.ts`（自動偵測 tokens/words 格式，合併翻譯 → VocabCard[]）
+10. [x] 修改 `src/index.ts`（新增 `--beginner` 旗標群組 + 模式分支 + CSV 輸入偵測）
+
+**備注**：
+- 不走逐 chunk NLP 管線，而是獨立的全書掃描管線（`buildGlobalFreqMap`），避免干擾現有流程
+- 覆蓋率基準線：停用詞 + A1 詞彙的 token 數先計入分子，讓里程碑更真實反映初學者起點
+- 雙 CSV 設計：`tokens.csv`（12 欄完整元資料）供存檔與追蹤；`words.csv`（6 欄精簡）供 DeepL 或人工翻譯，兩者可獨立使用
+- `token_id = "chunk042_sent3_tok7"` 格式讓每個詞都能追蹤回原文精確位置，滿足可驗證性需求
+- 填完 `words.csv` 後直接作為 CLI 輸入即可生成 APKG + HTML，不需額外合併步驟
+
+---
+
 ### [STEP-005] 讀書導向字卡模式（`--reading`）
 **狀態**：已完成
 **目標**：新增 `--reading` 旗標，產出以「讀懂本書」為目標的字卡（術語、因果、章節理解、主題意象），支援 `--mock`、Claude API、`--offline` 三種處理方式，現有流程不受影響。

@@ -21,8 +21,8 @@ import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
-import { exportBeginnerTokensToCsv } from './csv/beginnerExporter';
-import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv } from './csv/beginnerImporter';
+import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv } from './csv/beginnerExporter';
+import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords } from './csv/beginnerImporter';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -114,6 +114,32 @@ program
         process.exit(1);
       }
 
+      // 初學者翻譯 CSV（含 context_sentence 欄位）：直接轉為 VocabCard 輸出
+      if (csvPaths.length === 1 && isBeginnerWordsCsv(csvPaths[0])) {
+        console.log(chalk.yellow(`正在讀取初學者翻譯 CSV：${csvPaths[0]}`));
+        const vocabCards = importBeginnerWords(csvPaths[0]);
+        console.log(chalk.green(`✓ 共讀取 ${vocabCards.length} 張已翻譯字卡`));
+        if (vocabCards.length === 0) {
+          console.error(chalk.red('錯誤：CSV 中沒有已填入 definition_zh 的詞彙。'));
+          process.exit(1);
+        }
+        const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
+        console.log('');
+        console.log(chalk.yellow('正在匯出檔案...'));
+        const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+        const htmlPath = exportToHtml(csvCards, deckName, options.output);
+        console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
+        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+        if (options.flash) {
+          const flashPath = exportToFlashHtml(csvCards, deckName, options.output);
+          console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
+        }
+        console.log('');
+        console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
+        console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
+        return;
+      }
+
       // 初學者字彙 CSV（含 token_id 欄位）：合併翻譯後轉為 VocabCard
       if (csvPaths.length === 1 && isBeginnerCsv(csvPaths[0])) {
         console.log(chalk.yellow(`正在讀取初學者字彙 CSV：${csvPaths[0]}`));
@@ -197,16 +223,17 @@ program
 
       console.log(formatCoverageReport(result.report));
 
-      const csvPath = exportBeginnerTokensToCsv(
-        result.tokens,
-        deckName,
-        options.output,
-        result.report.recommended95Cutoff
-      );
-      console.log(chalk.green(`✓ 初學者字彙清單：${csvPath}`));
-      console.log(chalk.gray(`  共匯出 ${result.report.recommended95Cutoff} 個詞彙（達 ${Math.round(targetCoverage * 100)}% 覆蓋率）`));
-      console.log(chalk.gray(`  填入 definition_zh 後可執行：`));
-      console.log(chalk.gray(`  npx ts-node src/index.ts ${csvPath} -d "${deckName}"`));
+      const cutoff = result.report.recommended95Cutoff;
+      const tokensPath = exportBeginnerTokensToCsv(result.tokens, deckName, options.output, cutoff);
+      const wordsPath = exportBeginnerWordsToCsv(result.tokens, options.output, deckName, cutoff);
+      console.log(chalk.green(`✓ 完整元資料：${tokensPath}`));
+      console.log(chalk.green(`✓ 翻譯清單：  ${wordsPath}`));
+      console.log(chalk.gray(`  共 ${cutoff} 個詞彙（達 ${Math.round(targetCoverage * 100)}% 覆蓋率）`));
+      console.log('');
+      console.log(chalk.cyan('下一步：'));
+      console.log(chalk.cyan(`  1. 在 ${path.basename(wordsPath)} 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
+      console.log(chalk.cyan(`  2. 執行以下指令產生字卡：`));
+      console.log(chalk.white(`     npx ts-node src/index.ts ${wordsPath} -d "${deckName}"`));
       return;
     }
 

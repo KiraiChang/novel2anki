@@ -47,14 +47,44 @@ function splitLines(content: string): string[] {
   return lines;
 }
 
+function readFirstLine(csvPath: string): string {
+  try { return fs.readFileSync(csvPath, 'utf-8').split('\n')[0] ?? ''; }
+  catch { return ''; }
+}
+
 export function isBeginnerCsv(csvPath: string): boolean {
-  try {
-    const content = fs.readFileSync(csvPath, 'utf-8');
-    const firstLine = content.split('\n')[0] ?? '';
-    return firstLine.includes('token_id');
-  } catch {
-    return false;
+  return readFirstLine(csvPath).includes('token_id');
+}
+
+export function isBeginnerWordsCsv(csvPath: string): boolean {
+  const first = readFirstLine(csvPath);
+  return first.includes('context_sentence') && !first.includes('token_id');
+}
+
+export function importBeginnerWords(csvPath: string): VocabCard[] {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) return [];
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+  const cards: VocabCard[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseRow(lines[i]);
+    const get = (col: string) => cols[idx[col]] ?? '';
+    const definition = get('definition_zh').trim();
+    if (!definition) continue;
+
+    cards.push({
+      type: 'vocab',
+      word: get('lemma'),
+      definition_zh: definition,
+      exampleFromText: get('context_sentence'),
+    });
   }
+
+  return cards;
 }
 
 export function importBeginnerTokens(csvPath: string): WordToken[] {

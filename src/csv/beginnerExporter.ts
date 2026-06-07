@@ -29,6 +29,38 @@ function buildAiHint(token: WordToken, deckName: string): string {
   ].join('\n');
 }
 
+const WORDS_HEADERS = [
+  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'context_sentence', 'definition_zh',
+];
+
+export function exportBeginnerWordsToCsv(
+  tokens: WordToken[],
+  outputDir: string,
+  deckName: string,
+  cutoffIndex?: number
+): string {
+  const tokensToExport = cutoffIndex !== undefined ? tokens.slice(0, cutoffIndex) : tokens;
+  const lines: string[] = [row(WORDS_HEADERS)];
+
+  for (const token of tokensToExport) {
+    lines.push(row([
+      token.lemma,
+      token.pos,
+      token.cefrLevel,
+      String(token.coverageRank),
+      token.bestSentence,
+      token.definition_zh,
+    ]));
+  }
+
+  const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
+  const filename = `${slug}-beginner-words.csv`;
+  const outputPath = path.join(outputDir, filename);
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+  return outputPath;
+}
+
 export function exportBeginnerTokensToCsv(
   tokens: WordToken[],
   deckName: string,

@@ -36,6 +36,10 @@ npx ts-node src/index.ts <輸入> [選項]
   --split-size <數量>     將 CSV 依每 N 個 chunk 分割輸出（搭配 --mock）
   --reading               讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡
   --flash                 額外輸出單字卡 HTML（頁籤切換 + 上一張 / 下一張 + 翻面）
+  --beginner              初學者模式：掃描全書，擷取達目標覆蓋率所需詞彙，輸出翻譯用 CSV
+  --beginner-target <N>   覆蓋率目標 0–100（預設：95）
+  --beginner-min-freq <N> 詞彙最低出現次數（預設：2）
+  --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
 ```
 
 ## 使用範例
@@ -233,6 +237,72 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 | cloze | 挖空句（`___`） | 提示 ＋ 含答案原句（`【word】`）|
 | character | 人名 ＋ 首次出現原句 | 繁體中文描述 |
 | plot | 中文問題 | 答案 |
+
+## 初學者覆蓋率模式（`--beginner`）
+
+適用對象：熟悉中文、英文程度初階，想在讀完字卡後能閱讀整本小說。
+
+**設計原理**：根據語言學覆蓋率研究（Nation 2001），讀者認識文本中 95% 的詞時才能流暢閱讀。本模式掃描全書詞頻，計算出「學多少個字能達到目標覆蓋率」，並按重要性排序輸出供翻譯的清單。
+
+### 工作流程
+
+```bash
+# Step 1：掃描全書，輸出覆蓋率報告 + 兩個 CSV
+npx ts-node src/index.ts novel.epub --beginner
+
+# Step 2：填入 beginner-words.csv 的 definition_zh 欄位（手動或 DeepL）
+
+# Step 3：用填完的 words CSV 直接產生字卡
+npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel"
+```
+
+### 輸出的兩個 CSV
+
+| 檔案 | 欄位 | 用途 |
+|------|------|------|
+| `*-beginner-tokens.csv` | 12 欄（含 token_id、位置、ai_hint） | 完整元資料存檔、追蹤回原文位置 |
+| `*-beginner-words.csv` | 6 欄 | 精簡翻譯用，適合送 DeepL 或人工翻譯 |
+
+**words CSV 欄位**：
+
+| 欄位 | 說明 |
+|------|------|
+| `lemma` | 詞幹（字卡正面） |
+| `pos` | 詞性 |
+| `cefr_level` | CEFR 等級（A2–C2 / UNKNOWN） |
+| `coverage_rank` | 學習優先順序（1 = 最高頻，最先學） |
+| `context_sentence` | 最佳例句，提供翻譯語境（字卡背面） |
+| `definition_zh` | 繁體中文定義（留空，待翻譯） |
+
+### 覆蓋率報告範例
+
+```
+覆蓋率分析：novel
+──────────────────────────────────────────────────────────
+全書有效詞彙：12,845 unique lemma / 87,230 tokens
+基準覆蓋率：45%（初學者已知的停用詞 + A1 詞彙）
+──────────────────────────────────────────────────────────
+學   300 個字 → 理解 70%
+學   800 個字 → 理解 80%
+學  1500 個字 → 理解 90%
+學  2200 個字 → 理解 95%  ← 建議截止點
+學  3000 個字 → 理解 98%
+```
+
+### 可追蹤性（Traceability）
+
+`tokens.csv` 的 `token_id` 欄位格式為 `chunk042_sent3_tok7`，代表第 42 個段落、第 3 個句子、第 7 個 token，可精確追蹤回原文位置。`rejected` 欄位記錄每個被過濾詞的原因（`not-stopword`、`not-A1`、`not-hapax` 等），方便驗證選字邏輯。
+
+### 六條過濾規則
+
+| 規則 | 排除條件 |
+|------|---------|
+| `too-short` | 詞長 < 3 字元 |
+| `alpha-only` | 含非英文字母 |
+| `not-stopword` | 在停用詞清單中 |
+| `not-A1` | CEFR A1 詞彙（初學者已知，預設排除） |
+| `not-hapax` | 全書出現次數 < `--beginner-min-freq`（預設 2） |
+| `content-pos` | 非內容詞（代名詞、介系詞等） |
 
 ## 匯入 Anki
 
