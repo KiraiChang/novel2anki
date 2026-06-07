@@ -45,6 +45,7 @@ export interface GlobalFreqEntry {
   cefrLevel: CefrLevel | 'UNKNOWN';
   globalCount: number;
   occurrences: WordOccurrence[];
+  midSentenceCapitalCount: number; // times the word appeared capitalized at tokenIndex > 0
 }
 
 export type GlobalFreqMap = Map<string, GlobalFreqEntry>;

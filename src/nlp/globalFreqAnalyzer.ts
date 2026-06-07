@@ -56,10 +56,14 @@ export function buildGlobalFreqMap(
           tokenIndex: tokIdx,
         };
 
+        // Mid-sentence capitalization is a reliable proper-noun signal
+        const isMidSentenceCapital = tokIdx > 0 && /^[A-Z]/.test(token.original);
+
         const existing = freqMap.get(lemma);
         if (existing) {
           existing.globalCount++;
           existing.occurrences.push(occurrence);
+          if (isMidSentenceCapital) existing.midSentenceCapitalCount++;
         } else {
           freqMap.set(lemma, {
             lemma,
@@ -68,6 +72,7 @@ export function buildGlobalFreqMap(
             cefrLevel,
             globalCount: 1,
             occurrences: [occurrence],
+            midSentenceCapitalCount: isMidSentenceCapital ? 1 : 0,
           });
         }
       }

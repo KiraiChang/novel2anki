@@ -303,6 +303,7 @@ npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel"
 | `not-A1` | CEFR A1 詞彙（初學者已知，預設排除） |
 | `not-hapax` | 全書出現次數 < `--beginner-min-freq`（預設 2） |
 | `content-pos` | 非內容詞（代名詞、介系詞等） |
+| `proper-noun` | 在句子中間出現時大寫比例 > 70%（人名、地名等專有名詞） |
 
 ## 匯入 Anki
 

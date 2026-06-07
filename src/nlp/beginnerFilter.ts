@@ -27,6 +27,11 @@ export function applyBeginnerFilters(
   for (const entry of freqMap.values()) {
     let reason: string | null = null;
 
+    // Proper-noun detection: capitalized in >70% of mid-sentence occurrences
+    const midSentenceOccurrences = entry.occurrences.filter(o => o.tokenIndex > 0).length;
+    const isProperNoun = midSentenceOccurrences >= 3
+      && (entry.midSentenceCapitalCount / midSentenceOccurrences) > 0.7;
+
     if (entry.lemma.length < 3) {
       reason = 'too-short';
     } else if (!/^[a-z]+$/.test(entry.lemma)) {
@@ -39,6 +44,8 @@ export function applyBeginnerFilters(
       reason = 'not-hapax';
     } else if (!CONTENT_POS.has(entry.pos)) {
       reason = 'content-pos';
+    } else if (isProperNoun) {
+      reason = 'proper-noun';
     }
 
     if (reason) {
