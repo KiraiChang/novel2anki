@@ -117,16 +117,18 @@ program
       }
 
       // 初學者翻譯 CSV（含 context_sentence 欄位）：單檔或分割多檔皆支援
-      if (csvPaths.every(p => isBeginnerWordsCsv(p))) {
-        if (csvPaths.length > 1) {
-          console.log(chalk.yellow(`正在合併 ${csvPaths.length} 個初學者翻譯 CSV...`));
-          csvPaths.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
+      // 目錄中可能同時含有 tokens.csv，過濾出 words 類型即可
+      const beginnerWordsCsvs = csvPaths.filter(p => isBeginnerWordsCsv(p));
+      if (beginnerWordsCsvs.length > 0) {
+        if (beginnerWordsCsvs.length > 1) {
+          console.log(chalk.yellow(`正在合併 ${beginnerWordsCsvs.length} 個初學者翻譯 CSV...`));
+          beginnerWordsCsvs.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
         } else {
-          console.log(chalk.yellow(`正在讀取初學者翻譯 CSV：${csvPaths[0]}`));
+          console.log(chalk.yellow(`正在讀取初學者翻譯 CSV：${beginnerWordsCsvs[0]}`));
         }
-        const vocabCards = csvPaths.length > 1
-          ? importBeginnerWordsFromFiles(csvPaths)
-          : importBeginnerWords(csvPaths[0]);
+        const vocabCards = beginnerWordsCsvs.length > 1
+          ? importBeginnerWordsFromFiles(beginnerWordsCsvs)
+          : importBeginnerWords(beginnerWordsCsvs[0]);
         console.log(chalk.green(`✓ 共讀取 ${vocabCards.length} 張已翻譯字卡`));
         if (vocabCards.length === 0) {
           console.error(chalk.red('錯誤：CSV 中沒有已填入 definition_zh 的詞彙。'));
