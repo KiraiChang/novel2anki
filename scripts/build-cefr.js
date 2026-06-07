@@ -1,7 +1,20 @@
 /**
  * 建立完整 CEFR 詞表
- * 以 Oxford 5000 / NGSL 公開資料為基礎，合併現有 853 個詞
+ *
+ * 資料來源：
+ *   Oxford 5000（2026-06-07 整合）
+ *   GitHub: tyypgzl/Oxford-5000-words (full-word.json, 5948 entries)
+ *   下載指令（一次性）：
+ *     curl -s https://raw.githubusercontent.com/tyypgzl/Oxford-5000-words/main/full-word.json \
+ *       -o /tmp/oxford5000-full.json
+ *   處理指令（Python）：
+ *     python3 scripts/process-oxford.py > /tmp/oxford.json
+ *
+ *   現有 cefr-wordlist.json 已包含 Oxford 5000（4954 詞）
+ *   + 奇幻/文學補充詞（657 詞），共 5611 詞。
+ *
  * 執行：node scripts/build-cefr.js
+ *   僅需新增補充詞時執行；Oxford 基礎詞表已整合至 cefr-wordlist.json。
  */
 
 const fs = require('fs');

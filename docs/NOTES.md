@@ -41,6 +41,12 @@
 
 - **CEFR 詞表篩選範圍為 B1-C2**：A1/A2 為過於基礎的詞彙，讀英文小說的使用者無需特別學習，管線在 `generateVocabSuggestions` 時直接過濾掉。
 
+- **CEFR 詞表擴充歷程**（`src/data/cefr-wordlist.json`，2026-06-07 更新）：原始 853 詞實為 AWL（Academic Word List），與一般 CEFR 標準差距極大（UNKNOWN 率高達 86%）。已三輪擴充至 5732 詞：
+  1. **Oxford 5000 整合**（`scripts/process-oxford.py`）：從 GitHub repo `tyypgzl/Oxford-5000-words`（`full-word.json`，5948 筆）下載，轉換為 `word:level` 格式；同字多詞性取最低 CEFR 等級（最容易的用法），得 4954 個 unique words。Oxford 資料為英式拼寫（defence、colour、centre…），美式拼寫另行補充。
+  2. **奇幻/敘事補充詞**（約 600 詞）：Oxford 5000 聚焦學術/商業詞彙，缺少中世紀奇幻常見詞（sword、armor、dragon 等）與常用敘事動詞（stride、gasp、groan 等），手動補充並對應 CEFR 等級。
+  3. **美式英語拼寫別字**：defense→B2, center→A1, theater→A1, fulfill→B2 等。
+  最終 UNKNOWN 率（《The Demon Awakens》）：86% → 37.8%。剩餘 37.8% 以奇幻發明詞（centaur, dactyl, powrie, fomorian）為主，無法分配標準 CEFR 等級，屬正常現象。
+
 - **NLP 管線失敗時降級為空 vocabSuggestions**：`processChunk` 內以 try/catch 包覆，失敗時回傳 `EMPTY_CHUNK_NLP`，三個生成器各自有 `suggestions.length === 0` 的降級路徑，整體流程不中斷。
 
 - **離線模式選用 Ollama 原生 `/api/chat` 而非 `/v1/chat/completions`**：原生端點支援 `format.json_schema` 結構化輸出，OpenAI 相容層不一定透傳此功能。
