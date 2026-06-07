@@ -21,8 +21,8 @@ import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
-import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv } from './csv/beginnerExporter';
-import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords } from './csv/beginnerImporter';
+import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit } from './csv/beginnerExporter';
+import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles } from './csv/beginnerImporter';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -54,6 +54,7 @@ program
   .option('--beginner-target <百分比>', '覆蓋率目標，0-100（預設：95）', '95')
   .option('--beginner-min-freq <次數>', '詞彙最低出現次數門檻（預設：2）', '2')
   .option('--beginner-include-a1', '包含 A1 基礎詞彙（預設：排除）')
+  .option('--beginner-split <數量>', '將翻譯 CSV 分割為每 N 個詞彙一個檔案')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -71,6 +72,7 @@ program
     beginnerTarget?: string;
     beginnerMinFreq?: string;
     beginnerIncludeA1?: boolean;
+    beginnerSplit?: string;
   }) => {
     const needsApiKey = !options.mock && !options.offline && !options.deepl;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
@@ -114,10 +116,17 @@ program
         process.exit(1);
       }
 
-      // 初學者翻譯 CSV（含 context_sentence 欄位）：直接轉為 VocabCard 輸出
-      if (csvPaths.length === 1 && isBeginnerWordsCsv(csvPaths[0])) {
-        console.log(chalk.yellow(`正在讀取初學者翻譯 CSV：${csvPaths[0]}`));
-        const vocabCards = importBeginnerWords(csvPaths[0]);
+      // 初學者翻譯 CSV（含 context_sentence 欄位）：單檔或分割多檔皆支援
+      if (csvPaths.every(p => isBeginnerWordsCsv(p))) {
+        if (csvPaths.length > 1) {
+          console.log(chalk.yellow(`正在合併 ${csvPaths.length} 個初學者翻譯 CSV...`));
+          csvPaths.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
+        } else {
+          console.log(chalk.yellow(`正在讀取初學者翻譯 CSV：${csvPaths[0]}`));
+        }
+        const vocabCards = csvPaths.length > 1
+          ? importBeginnerWordsFromFiles(csvPaths)
+          : importBeginnerWords(csvPaths[0]);
         console.log(chalk.green(`✓ 共讀取 ${vocabCards.length} 張已翻譯字卡`));
         if (vocabCards.length === 0) {
           console.error(chalk.red('錯誤：CSV 中沒有已填入 definition_zh 的詞彙。'));
@@ -225,15 +234,29 @@ program
 
       const cutoff = result.report.recommended95Cutoff;
       const tokensPath = exportBeginnerTokensToCsv(result.tokens, deckName, options.output, cutoff);
-      const wordsPath = exportBeginnerWordsToCsv(result.tokens, options.output, deckName, cutoff);
       console.log(chalk.green(`✓ 完整元資料：${tokensPath}`));
-      console.log(chalk.green(`✓ 翻譯清單：  ${wordsPath}`));
       console.log(chalk.gray(`  共 ${cutoff} 個詞彙（達 ${Math.round(targetCoverage * 100)}% 覆蓋率）`));
-      console.log('');
-      console.log(chalk.cyan('下一步：'));
-      console.log(chalk.cyan(`  1. 在 ${path.basename(wordsPath)} 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
-      console.log(chalk.cyan(`  2. 執行以下指令產生字卡：`));
-      console.log(chalk.white(`     npx ts-node src/index.ts ${wordsPath} -d "${deckName}"`));
+
+      const splitSize = options.beginnerSplit ? parseInt(options.beginnerSplit, 10) : undefined;
+      if (splitSize && splitSize > 0) {
+        const splitPaths = exportBeginnerWordsSplit(result.tokens, options.output, deckName, splitSize, cutoff);
+        console.log(chalk.green(`✓ 翻譯清單（分割）：${splitPaths.length} 個檔案`));
+        splitPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
+        console.log('');
+        console.log(chalk.cyan('下一步：'));
+        console.log(chalk.cyan(`  1. 在各分割 CSV 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
+        console.log(chalk.cyan(`  2. 翻譯完成後，執行以下指令合併並產生字卡：`));
+        console.log(chalk.white(`     npx ts-node src/index.ts ${options.output} -d "${deckName}"`));
+        console.log(chalk.gray(`     （指定含所有分割 CSV 的目錄，系統會自動偵測並合併）`));
+      } else {
+        const wordsPath = exportBeginnerWordsToCsv(result.tokens, options.output, deckName, cutoff);
+        console.log(chalk.green(`✓ 翻譯清單：  ${wordsPath}`));
+        console.log('');
+        console.log(chalk.cyan('下一步：'));
+        console.log(chalk.cyan(`  1. 在 ${path.basename(wordsPath)} 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
+        console.log(chalk.cyan(`  2. 執行以下指令產生字卡：`));
+        console.log(chalk.white(`     npx ts-node src/index.ts ${wordsPath} -d "${deckName}"`));
+      }
       return;
     }
 

@@ -119,6 +119,45 @@ export function importBeginnerTokens(csvPath: string): WordToken[] {
   return tokens;
 }
 
+export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
+  interface RankedCard { card: VocabCard; coverageRank: number; }
+
+  const seen = new Set<string>();
+  const ranked: RankedCard[] = [];
+
+  for (const csvPath of csvPaths) {
+    const content = fs.readFileSync(csvPath, 'utf-8');
+    const lines = splitLines(content);
+    if (lines.length < 2) continue;
+
+    const headers = parseRow(lines[0]);
+    const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseRow(lines[i]);
+      const get = (col: string) => cols[idx[col]] ?? '';
+      const lemma = get('lemma').trim();
+      const definition = get('definition_zh').trim();
+
+      if (!definition || !lemma || seen.has(lemma)) continue;
+      seen.add(lemma);
+
+      ranked.push({
+        card: {
+          type: 'vocab' as const,
+          word: lemma,
+          definition_zh: definition,
+          exampleFromText: get('context_sentence'),
+        },
+        coverageRank: parseInt(get('coverage_rank'), 10) || 0,
+      });
+    }
+  }
+
+  ranked.sort((a, b) => a.coverageRank - b.coverageRank);
+  return ranked.map(r => r.card);
+}
+
 export function mergeTokensToVocabCards(tokens: WordToken[]): VocabCard[] {
   return tokens
     .filter(t => t.definition_zh.trim().length > 0)

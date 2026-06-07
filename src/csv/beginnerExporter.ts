@@ -33,6 +33,43 @@ const WORDS_HEADERS = [
   'lemma', 'pos', 'cefr_level', 'coverage_rank', 'context_sentence', 'definition_zh',
 ];
 
+export function exportBeginnerWordsSplit(
+  tokens: WordToken[],
+  outputDir: string,
+  deckName: string,
+  splitSize: number,
+  cutoffIndex?: number
+): string[] {
+  const tokensToExport = cutoffIndex !== undefined ? tokens.slice(0, cutoffIndex) : tokens;
+  const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
+  const total = Math.ceil(tokensToExport.length / splitSize);
+  const pad = String(total).length;
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const paths: string[] = [];
+  for (let i = 0; i < tokensToExport.length; i += splitSize) {
+    const chunk = tokensToExport.slice(i, i + splitSize);
+    const partNum = String(Math.floor(i / splitSize) + 1).padStart(pad < 2 ? 2 : pad, '0');
+    const filename = `${slug}-beginner-words-part-${partNum}.csv`;
+    const outputPath = path.join(outputDir, filename);
+
+    const lines: string[] = [row(WORDS_HEADERS)];
+    for (const token of chunk) {
+      lines.push(row([
+        token.lemma,
+        token.pos,
+        token.cefrLevel,
+        String(token.coverageRank),
+        token.bestSentence,
+        token.definition_zh,
+      ]));
+    }
+    fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+    paths.push(outputPath);
+  }
+  return paths;
+}
+
 export function exportBeginnerWordsToCsv(
   tokens: WordToken[],
   outputDir: string,
