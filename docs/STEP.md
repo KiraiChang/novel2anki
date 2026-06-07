@@ -18,6 +18,18 @@
 
 ---
 
+### [STEP-009] NLP 詞形還原升級：compromise → wink-lemmatizer
+**狀態**：已完成
+**目標**：補強 compromise 完全不處理形容詞比較級/最高級的缺口，提升 lemma 品質，讓 CEFR 查詢與覆蓋率統計更準確。
+
+1. [x] 評估 wink-tokenizer：輸出無 POS，無法取代 compromise，確認不引入
+2. [x] `src/nlp/lemmatizer.ts`：移除 compromise 的 `toInfinitive()` / `toSingular()`，改用 `wink-lemmatizer`（`verb()` / `noun()` / `adjective()`），新增 `ADJ_POS` 集合處理形容詞；輸入統一 lowercase，找不到時以 `|| lower` fallback
+3. [x] `package.json`：新增 `wink-lemmatizer`（lemma）相依
+
+**備注**：`tokenizer.ts` 仍使用 compromise 做全句一次性 POS 標記（context-aware），`lemmatizer.ts` 只負責依 POS 選呼叫哪個 wink 函式。兩套工具職責分工，不重複。
+
+---
+
 ### [STEP-008] DeepL 翻譯品質修正與強制重翻功能
 **狀態**：已完成
 **目標**：修正 DeepL 輸出為簡體中文的語言代碼錯誤，加入 `--deepl-force` 讓使用者不需手動清除 CSV 即可強制重新翻譯。

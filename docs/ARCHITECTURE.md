@@ -131,7 +131,7 @@ beginnerExporter.ts
 | EPUB 提取 | `src/epub/extractor.ts` | epub2 → stripHtml → 分割 → Chunk[] |
 | 型別定義 | `src/cards/types.ts` | Chunk、*Card、GeneratedCards 介面 |
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
-| NLP 管線 | `src/nlp/pipeline.ts` | compromise tokenize → lemma → 詞頻 → CEFR 分級 → EnrichedChunk[] |
+| NLP 管線 | `src/nlp/pipeline.ts` | compromise tokenize+POS → wink-lemmatizer lemma → 詞頻 → CEFR 分級 → EnrichedChunk[] |
 | NLP 型別 | `src/nlp/types.ts` | `EnrichedChunk`、`ChunkNLP`、`VocabSuggestion`、`CefrLevel`、`WordToken`、`GlobalFreqEntry` |
 | CEFR 查詢 | `src/nlp/cefrLookup.ts` | `lookupCefrLevel()`、`generateVocabSuggestions()` |
 | NLP 輔助 | `src/nlp/promptHelper.ts` | `buildNlpHint()` — 注入 LLM prompt 的建議詞彙區塊 |
@@ -216,4 +216,5 @@ interface WordToken {
 | `dotenv` | 載入 `.env` 環境變數 |
 | `deepl-node` | DeepL 官方 SDK，`--deepl` / `--deepl-force` 模式批次翻譯（目標語言 `zh-HANT`） |
 | `fetch()` | Node 18+ 內建，Ollama REST API 呼叫與 Free Dictionary API 查詢（不引入新套件） |
-| `compromise` | 純 JS NLP，tokenize / POS / lemma（verbs→infinitive，nouns→singular） |
+| `compromise` | 純 JS NLP，tokenize / POS tagging（全句上下文，提供 verbs/nouns/adjectives 詞性標記） |
+| `wink-lemmatizer` | 英文詞形還原，補強 compromise 不處理的形容詞比較級/最高級（faster→fast、best→good、worst→bad） |

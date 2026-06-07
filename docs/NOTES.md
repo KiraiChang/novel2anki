@@ -16,7 +16,8 @@
 
 - **`@types/archiver` 為殘留相依**：專案最終改用 `jszip` 打包，`archiver` 未被引用，可安全移除。
 
-- **NLP 管線使用 compromise 的 POS 分類做形態還原**：`Verb / Infinitive / PastTense / Gerund` 類的 token 用 `toInfinitive()` 還原，`Noun / Plural` 用 `toSingular()` 還原，其他類直接用 `normal`（小寫去標點）。compromise v14 不規則動詞覆蓋率約 95%，少數找不到的詞會 fallback 到 normal，僅影響 CEFR 查不到對應詞條，不會報錯。
+- **NLP 管線分兩套工具負責 POS 與 lemma**：`tokenizer.ts` 以 compromise 對全句做一次 `nlp(text)` 取得上下文 POS（`Verb / Noun / Adjective` 等）；`lemmatizer.ts` 改用 wink-lemmatizer 做詞形還原（`verb()` / `noun()` / `adjective()`，輸入統一 lowercase）。原本 compromise 的 `toInfinitive()` / `toSingular()` 不處理形容詞比較級/最高級，換用 wink-lemmatizer 後 `faster→fast`、`best→good`、`worst→bad` 等案例全部正確。wink-lemmatizer 找不到對應形式時回傳空字串，程式以 `|| lower` 作 fallback，不影響整體流程。
+- **不引入 wink-tokenizer**：其輸出只有 `{ value, tag: 'word' }` 無 POS，無法取代 compromise 的 POS 標記步驟；而 compromise 的 tokenizer 對英文散文已足夠，故不引入。
 
 - **CEFR 詞表篩選範圍為 B1-C2**：A1/A2 為過於基礎的詞彙，讀英文小說的使用者無需特別學習，管線在 `generateVocabSuggestions` 時直接過濾掉。
 
