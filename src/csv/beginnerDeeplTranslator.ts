@@ -81,12 +81,17 @@ async function fetchEnglishDefinition(word: string): Promise<string | null> {
 
 // ── 批次翻譯工具 ─────────────────────────────────────────────────────────────
 
-async function batchTranslateChunked(texts: string[], config: DeepLConfig): Promise<string[]> {
+async function batchTranslateChunked(
+  texts: string[],
+  config: DeepLConfig,
+  onProgress?: (done: number, total: number) => void,
+): Promise<string[]> {
   const results: string[] = [];
   for (let i = 0; i < texts.length; i += DEEPL_BATCH_SIZE) {
     const chunk = texts.slice(i, i + DEEPL_BATCH_SIZE);
     const translated = await batchTranslate(chunk, config);
     results.push(...translated);
+    onProgress?.(Math.min(i + DEEPL_BATCH_SIZE, texts.length), texts.length);
   }
   return results;
 }
@@ -195,8 +200,9 @@ export async function translateBeginnerWordsCsv(
   const sentences = needTranslation.map(({ cols }) => get(cols, 'context_sentence'));
   const allTexts = [...englishDefs, ...sentences];
   onProgress?.(0, allTexts.length, 'deepl');
-  const allTranslated = await batchTranslateChunked(allTexts, config);
-  onProgress?.(allTexts.length, allTexts.length, 'deepl');
+  const allTranslated = await batchTranslateChunked(allTexts, config, (done, total) => {
+    onProgress?.(done, total, 'deepl');
+  });
 
   const defZh = allTranslated.slice(0, englishDefs.length);
   const sentZh = allTranslated.slice(englishDefs.length);
