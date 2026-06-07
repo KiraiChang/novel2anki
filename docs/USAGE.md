@@ -260,41 +260,27 @@ npx ts-node src/index.ts novel.epub --beginner
 npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
 ```
 
-#### DeepL 一次完成（小詞彙量）
+#### DeepL 翻譯（單一 words CSV）
+
+`--deepl` 只負責翻譯並覆寫 CSV，**不產生 APKG / HTML**，讓你確認所有分割檔都翻譯完後再統一合併。
 
 ```bash
-# 擷取 → 顯示費用估算 → [Y/n] 確認 → DeepL 翻譯 → 提示產卡指令
-npx ts-node src/index.ts novel.epub --beginner --deepl
-
-# 翻譯完成後產生字卡
-npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
-```
-
-#### DeepL 分割翻譯（大詞彙量，推薦）
-
-```bash
-# Step 1：擷取並分割，每 100 個詞一個 CSV
+# Step 1：擷取（單一檔或分割）
+npx ts-node src/index.ts novel.epub --beginner
+# 或分割版（每 100 個詞一個 CSV）
 npx ts-node src/index.ts novel.epub --beginner --beginner-split 100
-# 輸出：
-#   output/novel-beginner-words-part-01.csv  （詞 1–100）
-#   output/novel-beginner-words-part-02.csv  （詞 101–200）
-#   output/novel-beginner-words-part-03.csv  ...
 
-# Step 2：逐一翻譯各分割 CSV
-#         每次翻譯前顯示費用估算並確認，翻譯結果直接寫回 CSV
+# Step 2：逐一翻譯各分割 CSV（翻譯結果直接寫回 CSV）
+#         每次執行前顯示費用估算，輸入 [Y/n] 確認後才送出
 npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl
 npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --deepl
 # ...（重複至全部完成）
 
-# Step 3：所有分割 CSV 翻譯完成後，整目錄合併產出最終字卡
+# Step 3：所有 CSV 翻譯完成後，整目錄合併產出最終字卡
 npx ts-node src/index.ts output/ -d "Novel" --flash
 ```
 
-> **提示**：Step 2 也可一次整目錄翻譯所有未翻譯的分割 CSV，適合確定費用後一口氣處理：
-> ```bash
-> npx ts-node src/index.ts output/ -d "Novel" --deepl --flash
-> ```
-> 系統會自動跳過已翻譯的列，並在完成後直接輸出 `.apkg` 與 `.html`。
+> `--deepl` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。
 
 ### 輸出的兩個 CSV
 

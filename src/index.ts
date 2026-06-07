@@ -121,14 +121,15 @@ program
       // 目錄中可能同時含有 tokens.csv，過濾出 words 類型即可
       const beginnerWordsCsvs = csvPaths.filter(p => isBeginnerWordsCsv(p));
       if (beginnerWordsCsvs.length > 0) {
-        // DeepL 自動翻譯：翻譯後才讀入字卡
+        // DeepL 自動翻譯：翻譯後覆寫 CSV 並退出，不產生 APKG/HTML
+        // 使用者等所有分割檔翻譯完畢後再整目錄合併產出字卡
         if (options.deepl) {
           const deeplCfg = loadDeepLConfig();
           const est = estimateBeginnerTranslate(beginnerWordsCsvs);
           console.log('');
           console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
           if (est.untranslatedCount === 0) {
-            console.log(chalk.gray('所有詞彙已翻譯，跳過 DeepL 步驟。'));
+            console.log(chalk.gray('所有詞彙已翻譯，CSV 無需更新。'));
           } else {
             const confirmed = await new Promise<boolean>(resolve => {
               const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -148,8 +149,12 @@ program
               });
               process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
             }
-            console.log('');
           }
+          console.log('');
+          const outputDir = isDirectory ? pdfFile : path.dirname(beginnerWordsCsvs[0]);
+          console.log(chalk.cyan('翻譯已寫回 CSV。所有分割檔翻譯完成後，執行以下指令產生字卡：'));
+          console.log(chalk.white(`  npx ts-node src/index.ts ${outputDir} -d "${deckName}" --flash`));
+          return;
         }
 
         if (beginnerWordsCsvs.length > 1) {
