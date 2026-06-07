@@ -73,14 +73,11 @@ export function importBeginnerWords(csvPath: string): VocabCard[] {
   for (let i = 1; i < lines.length; i++) {
     const cols = parseRow(lines[i]);
     const get = (col: string) => cols[idx[col]] ?? '';
-    const definition = get('definition_zh').trim();
-    if (!definition) continue;
-
     const exampleZh = get('context_sentence_zh').trim();
     cards.push({
       type: 'vocab',
       word: get('lemma'),
-      definition_zh: definition,
+      definition_zh: get('definition_zh').trim(),
       exampleFromText: get('context_sentence'),
       ...(exampleZh ? { exampleZh } : {}),
     });
@@ -139,9 +136,8 @@ export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
       const cols = parseRow(lines[i]);
       const get = (col: string) => cols[idx[col]] ?? '';
       const lemma = get('lemma').trim();
-      const definition = get('definition_zh').trim();
 
-      if (!definition || !lemma || seen.has(lemma)) continue;
+      if (!lemma || seen.has(lemma)) continue;
       seen.add(lemma);
 
       const exampleZh = get('context_sentence_zh').trim();
@@ -149,7 +145,7 @@ export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
         card: {
           type: 'vocab' as const,
           word: lemma,
-          definition_zh: definition,
+          definition_zh: get('definition_zh').trim(),
           exampleFromText: get('context_sentence'),
           ...(exampleZh ? { exampleZh } : {}),
         },
@@ -162,13 +158,74 @@ export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
   return ranked.map(r => r.card);
 }
 
+export interface WordStat {
+  lemma: string;
+  pos: string;
+  cefr: string;
+  rank: number;
+  frequency: number;
+  translated: boolean;
+  definition_zh: string;
+}
+
+export interface BeginnerWordStats {
+  total: number;
+  translated: number;
+  cefrDist: Record<string, number>;
+  rankMin: number;
+  rankMax: number;
+  words: WordStat[];
+}
+
+export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats {
+  const seen = new Set<string>();
+  let total = 0;
+  let translated = 0;
+  const cefrDist: Record<string, number> = {};
+  let rankMin = Infinity;
+  let rankMax = 0;
+  const words: WordStat[] = [];
+
+  for (const csvPath of csvPaths) {
+    let content: string;
+    try { content = fs.readFileSync(csvPath, 'utf-8'); } catch { continue; }
+    const lines = splitLines(content);
+    if (lines.length < 2) continue;
+
+    const headers = parseRow(lines[0]);
+    const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseRow(lines[i]);
+      const get = (col: string) => cols[idx[col]] ?? '';
+      const lemma = get('lemma').trim();
+      if (!lemma || seen.has(lemma)) continue;
+      seen.add(lemma);
+
+      total++;
+      const def = get('definition_zh').trim();
+      if (def) translated++;
+      const cefr = get('cefr_level').trim() || 'UNKNOWN';
+      cefrDist[cefr] = (cefrDist[cefr] ?? 0) + 1;
+      const rank = parseInt(get('coverage_rank'), 10) || 0;
+      const frequency = parseInt(get('global_frequency'), 10) || 0;
+      if (rank > 0) {
+        rankMin = Math.min(rankMin, rank);
+        rankMax = Math.max(rankMax, rank);
+      }
+      words.push({ lemma, pos: get('pos').trim(), cefr, rank, frequency, translated: !!def, definition_zh: def });
+    }
+  }
+
+  words.sort((a, b) => a.rank - b.rank);
+  return { total, translated, cefrDist, rankMin: isFinite(rankMin) ? rankMin : 0, rankMax, words };
+}
+
 export function mergeTokensToVocabCards(tokens: WordToken[]): VocabCard[] {
-  return tokens
-    .filter(t => t.definition_zh.trim().length > 0)
-    .map(t => ({
-      type: 'vocab' as const,
-      word: t.lemma,
-      definition_zh: t.definition_zh,
-      exampleFromText: t.bestSentence,
-    }));
+  return tokens.map(t => ({
+    type: 'vocab' as const,
+    word: t.lemma,
+    definition_zh: t.definition_zh,
+    exampleFromText: t.bestSentence,
+  }));
 }

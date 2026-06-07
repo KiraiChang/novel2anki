@@ -21,7 +21,21 @@
 
 - **DeepL 批次採交錯排列而非分段排列**：原始設計是 `[def1…defN, sent1…sentN]`（定義與句子各一段），改為 `[def1, sent1, def2, sent2, …]`（交錯）後，每個定義的 DeepL 上下文鄰居是同一個詞的例句，而非其他詞的定義，利用 DeepL 的 context-aware 翻譯選出正確詞義（如 `(noun) Heaven` 在 "as he lost his fear" 語境下不會被翻成「天堂」）。
 
-- **字典 API 選用 Merriam-Webster 作為主要來源**：Free Dictionary API（dictionaryapi.dev，Wiktionary 資料）的第一筆定義常為冷僻義（`above` adjective → "Of heaven; heavenly"）。MW Collegiate API 的 `shortdef` 欄位為人工編輯的教學向定義，無需另行清理格式符號；免費方案 1000 req/day 已足夠使用（100 詞 = 100 次查詢）。設定 `MW_API_KEY` 後自動優先使用，未設定或查詢失敗時 fallback 到 Free Dictionary API，不影響既有流程。
+- **字典 API 選用 Merriam-Webster Learner's Dictionary 作為主要來源**：Free Dictionary API（dictionaryapi.dev，Wiktionary 資料）的第一筆定義常為冷僻義（`above` adjective → "Of heaven; heavenly"）。MW Learner's API 的 `shortdef` 欄位為人工編輯的教學向定義，無需另行清理格式符號；免費方案 1000 req/day 已足夠使用（100 詞 = 100 次查詢）。**注意：dictionaryapi.com 上有多種字典產品（Collegiate、Learner's、Medical…），每個字典各有獨立 API key；填錯會收到 403 並靜默 fallback，現已加上 stderr 警告訊息。** 申請時需選擇 "Merriam-Webster's Learner's Dictionary"。設定 `MW_API_KEY` 後自動優先使用，未設定或查詢失敗時 fallback 到 Free Dictionary API，不影響既有流程。
+
+- **`extractSentences` 以換行符切割防止詩節混入**（`src/nlp/globalFreqAnalyzer.ts`）：原本只在 `.!?` 後切句，書中詩節（如 `"The shining sword, the horse's run,\nThe bane of monsters all and one."`）整段被視為單一句子並帶著 `\n` 存入 occurrence。改為同時在 `\n+` 處切割後，詩行各自成為獨立候選句（不含換行符），Sentence Mining 評分後分數低於正常敘述句而不被選中。修正後詩/分行比例從 3.1% 降至 0%，純敘述從 87.6% 升至 91.4%。
+
+- **例句評分採 Sentence Mining 原則**（`src/nlp/sentenceScorer.ts`）：有意義的例句定義為「離開原書後仍能獨立理解，且能幫助推測目標單字」。評分標準：
+  - **對話懲罰 -5**：以引號 / em dash 開頭，或 >55% 字元在引號內 → 依賴說話者與對話脈絡，無法獨立理解
+  - **代詞開頭懲罰 -2**：He / She / They / His / Her / Their 開頭 → 需要前文才知道指涉對象
+  - **說話動詞懲罰 -1**：said / whispered / replied… 出現在非對話句 → 語境稍弱
+  - **純敘述加分 +2**：無任何引號 → 最適合獨立學習
+  - **長度理想區間 40–120 +5**（原 30–100）：SM 需要足夠前後文供讀者推測詞義
+  - 代詞開頭雖有 -2，但詞位置好可補回 +2，因此在候選句有限時仍可能被選中；有多個候選句時會輸給同分的無代詞敘述句
+
+- **初學者字彙統計 HTML 為自含式靜態頁面**：`beginnerStatsExporter.ts` 產生的 HTML 不依賴任何外部資源（CDN、框架），所有樣式與 JS 內嵌，可離線瀏覽。排序邏輯在瀏覽器端以 vanilla JS 實作（約 40 行），數字欄（排名、出現次數）用 `parseFloat` 判斷，字串欄用 `localeCompare('zh-TW')`。詞彙表來自 words CSV 的 `global_frequency` 欄；舊版 CSV（7 欄，無 `global_frequency`）讀到的頻率為 0，需重新跑 `--beginner` 產生 8 欄 CSV 後才能正確顯示。
+
+- **初學者模式匯入不過濾空翻譯**：`beginnerImporter.ts` 的三個函式（`importBeginnerWords`、`importBeginnerWordsFromFiles`、`mergeTokensToVocabCards`）不再過濾 `definition_zh` 為空的列。未翻譯的單字也會合併成 VocabCard，Anki 字卡背面定義欄位顯示空白，讓使用者可以在不完整翻譯的情況下仍能匯出並學習例句。
 
 - **CEFR 詞表篩選範圍為 B1-C2**：A1/A2 為過於基礎的詞彙，讀英文小說的使用者無需特別學習，管線在 `generateVocabSuggestions` 時直接過濾掉。
 

@@ -28,8 +28,9 @@
 
 ## 初學者模式（`--beginner` + `--deepl`）
 
-- **字典 API 定義品質不足**（`src/csv/beginnerDeeplTranslator.ts`）：已改為 MW API 優先，但 Fantasy 自創詞（如 `powrie`、`powry`）兩個 API 皆無收錄，fallback 為詞本身，DeepL 遇到無意義字串可能亂翻，需人工校正。
+- **字典 API 定義品質不足**（`src/csv/beginnerDeeplTranslator.ts`）：已改為 MW Learner's API 優先，但 Fantasy 自創詞（如 `powrie`、`powry`）兩個 API 皆無收錄，fallback 為詞本身，DeepL 遇到無意義字串可能亂翻，需人工校正。
 - **DeepL 批次上下文影響翻譯**（`src/csv/beginnerDeeplTranslator.ts`）：DeepL array 模式會以同批次文字互為上下文，雖已改為交錯排列（`[def1, sent1, def2, sent2, …]`）降低跨詞污染，但同批次內 25 組詞對仍可能相互干擾，無法完全消除。
+- **MW API key 類型錯誤靜默 fallback**（`src/csv/beginnerDeeplTranslator.ts`，已修復）：dictionaryapi.com 不同字典各有獨立 key；填入 Collegiate key 但呼叫 Learner's 端點（或反之）會收到 403，原本靜默 fallback 到 Free Dictionary，使用者不知道 MW 未生效。已修正為：① 使用 Learner's 端點（`/learners/json`）；② `!res.ok` 時輸出 stderr 警告訊息。
 
 ## Mock 模式
 

@@ -90,8 +90,12 @@ sentenceScorer.ts  ← 為每個詞從所有出現的句子中選最佳例句
   │
 beginnerExporter.ts
   ├─ *-beginner-tokens.csv（12 欄，完整元資料 + ai_hint）
-  ├─ *-beginner-words.csv（7 欄，精簡翻譯用）          ← --beginner
-  └─ *-beginner-words-part-NN.csv（7 欄，分割版）      ← --beginner-split N
+  ├─ *-beginner-words.csv（8 欄，含 global_frequency）  ← --beginner
+  └─ *-beginner-words-part-NN.csv（8 欄，分割版）       ← --beginner-split N
+
+  words CSV 欄位（8 欄）：
+    lemma | pos | cefr_level | coverage_rank | global_frequency |
+    context_sentence | context_sentence_zh | definition_zh
 
   [選用] beginnerDeeplTranslator.ts（--deepl / --deepl-force）
     estimateBeginnerTranslate(csvPaths, { force? })
@@ -103,8 +107,10 @@ beginnerExporter.ts
         for each lemma:
           normalizePOS(pos)  CSV 詞性 → API 詞性字串（小寫）
           ① 若設定 MW_API_KEY：
-               GET dictionaryapi.com/…/{lemma}?key=…
+               GET dictionaryapi.com/api/v3/references/learners/json/{lemma}?key=…
+               （Merriam-Webster Learner's Dictionary；非 Collegiate）
                找符合 POS 的 entry → shortdef[0]（isUsableMW 過濾 see/compare 開頭）
+               HTTP 非 200 時印 stderr 錯誤訊息（key 類型錯誤警告）
           ② MW 失敗或無 key：
                GET dictionaryapi.dev/api/v2/entries/en/{lemma}
                找符合 POS 的 meaning → definitions[0]（isUsableFree 過濾交叉參照）
@@ -121,6 +127,19 @@ beginnerExporter.ts
         context_sentence_zh ← sentZh[j]（已有內容跳過；force 模式強制覆寫）
 
     --deepl-force：needTranslation = 全部列（不過濾已翻譯）
+
+  [CSV 輸入 → 字卡輸出路徑（已翻譯 CSV 直接匯出）]
+    computeBeginnerWordStats(csvPaths)
+      → BeginnerWordStats { total, translated, cefrDist, rankMin, rankMax, words: WordStat[] }
+      （讀 global_frequency / cefr_level / coverage_rank / definition_zh，依 coverage_rank 排序）
+
+    exportBeginnerStatsToHtml(stats, deckName, outputDir)
+      → *-beginner-stats.html（自含式 HTML，包含）
+        ① 摘要卡片：總數 / 已翻譯數（%）/ 未翻譯數
+        ② CEFR 分佈長條圖（A1–C2 + UNKNOWN，各級配色）
+        ③ 詞彙表：排名 / 單字 / 詞性 / CEFR / 出現次數 / 定義 / 已譯
+           ↳ 欄位點擊排序（數字 / 字串自動判斷）
+           ↳ 搜尋框（單字 + 定義全文）、CEFR 篩選、翻譯狀態篩選
 ```
 
 ## 模組職責
@@ -151,14 +170,15 @@ beginnerExporter.ts
 | 模組 | 路徑 | 職責 |
 |------|------|------|
 | 主協調器 | `src/nlp/beginnerExtractor.ts` | 串接全書掃描 → 過濾 → 排序 → 例句選擇，對外單一入口 |
-| 全書詞頻 | `src/nlp/globalFreqAnalyzer.ts` | 跨 Chunk 詞頻統計，記錄每個 token 的 id 與所在句子 |
+| 全書詞頻 | `src/nlp/globalFreqAnalyzer.ts` | 跨 Chunk 詞頻統計，記錄每個 token 的 id 與所在句子；`extractSentences` 以 `.!?` 與 `\n` 雙重切割，避免詩節跨行被整段納入 |
 | 初學者過濾 | `src/nlp/beginnerFilter.ts` | 6 條規則過濾，每個被排除的詞記錄 reason 供驗證 |
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
-| 例句評分 | `src/nlp/sentenceScorer.ts` | 為每個詞從所有出現句子中選最適合學習的例句 |
+| 例句評分 | `src/nlp/sentenceScorer.ts` | Sentence Mining 評分：為每個詞選出「離開原書後仍能獨立理解且能推測詞義」的例句；對話句（引號 / em dash）`-5`、代詞開頭（He/She/They…）`-2`、說話動詞 `-1`、純敘述 `+2`、長度 40–120 `+5` |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
-| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（7 欄翻譯用）+ 分割版 words CSV |
-| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[] |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（8 欄，含 `global_frequency`）+ 分割版 words CSV |
+| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
+| 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW Learner's API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾，onProgress 回報 source 標記）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
 
 ## 核心型別
 
@@ -194,6 +214,19 @@ interface WordToken {
   bestSentence: string; bestSentenceScore: number;
   sourceChunkIndex: number; sourceChapter?: string;
   definition_zh: string;   // 空字串 → 翻譯後填入
+}
+
+// 字彙統計（beginnerImporter.ts，供 HTML 報告使用）
+interface WordStat {
+  lemma: string; pos: string; cefr: string;
+  rank: number; frequency: number;
+  translated: boolean; definition_zh: string;
+}
+interface BeginnerWordStats {
+  total: number; translated: number;
+  cefrDist: Record<string, number>;
+  rankMin: number; rankMax: number;
+  words: WordStat[];   // 依 coverage_rank 排序
 }
 ```
 

@@ -6,7 +6,7 @@ import { lemmatize } from './lemmatizer';
 import { lookupCefrLevel } from './cefrLookup';
 
 function extractSentences(text: string): string[] {
-  return text.split(/(?<=[.!?])\s+/)
+  return text.split(/(?<=[.!?])\s+|\n+/)
     .map(s => s.trim())
     .filter(s => s.length >= 15 && s.length <= 400);
 }

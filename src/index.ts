@@ -17,12 +17,13 @@ import { generateDeepLCards } from './cards/deeplGenerator';
 import { loadDeepLConfig } from './cards/deeplTranslator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToFlashHtml, exportReadingToFlashHtml, exportToComparisonHtml } from './html/exporter';
+import { exportBeginnerStatsToHtml } from './html/beginnerStatsExporter';
 import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv/exporter';
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
 import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit } from './csv/beginnerExporter';
-import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles } from './csv/beginnerImporter';
+import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv } from './csv/beginnerDeeplTranslator';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
@@ -181,11 +182,39 @@ program
         const vocabCards = beginnerWordsCsvs.length > 1
           ? importBeginnerWordsFromFiles(beginnerWordsCsvs)
           : importBeginnerWords(beginnerWordsCsvs[0]);
-        console.log(chalk.green(`✓ 共讀取 ${vocabCards.length} 張已翻譯字卡`));
         if (vocabCards.length === 0) {
-          console.error(chalk.red('錯誤：CSV 中沒有已填入 definition_zh 的詞彙。'));
+          console.error(chalk.red('錯誤：CSV 中沒有任何詞彙。'));
           process.exit(1);
         }
+
+        // 字彙統計
+        const bwStats = computeBeginnerWordStats(beginnerWordsCsvs);
+        const translatedPct = bwStats.total > 0 ? Math.round(bwStats.translated / bwStats.total * 100) : 0;
+        const CEFR_ORDER = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'UNKNOWN'];
+        const statSep = chalk.gray('─'.repeat(40));
+        console.log('');
+        console.log(chalk.cyan('字彙統計'));
+        console.log(statSep);
+        console.log(`詞彙總數：   ${bwStats.total.toLocaleString()} 個`);
+        console.log(`已翻譯：     ${chalk.green(bwStats.translated.toLocaleString())} 個（${translatedPct}%）`);
+        if (bwStats.total - bwStats.translated > 0) {
+          console.log(`未翻譯：     ${chalk.yellow((bwStats.total - bwStats.translated).toLocaleString())} 個（定義欄位空白）`);
+        }
+        console.log(statSep);
+        console.log('CEFR 分佈：');
+        for (const level of CEFR_ORDER) {
+          const cnt = bwStats.cefrDist[level];
+          if (!cnt) continue;
+          const pct = Math.round(cnt / bwStats.total * 100);
+          console.log(`  ${level.padEnd(8)}${cnt.toString().padStart(5)} 個（${pct}%）`);
+        }
+        if (bwStats.rankMax > 0) {
+          console.log(statSep);
+          console.log(`覆蓋率排名：#${bwStats.rankMin} – #${bwStats.rankMax}`);
+        }
+        const statsHtmlPath = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
+        console.log(chalk.green(`✓ 字彙統計 HTML：${statsHtmlPath}`));
+
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
