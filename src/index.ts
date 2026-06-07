@@ -153,9 +153,14 @@ program
 
           for (const csvPath of beginnerWordsCsvs) {
             process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
-            const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
-              const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
-              process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+            const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
+              if (phase === 'dict') {
+                const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
+                process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
+              } else {
+                const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+                process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+              }
             }, { force });
             process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
           }
@@ -322,9 +327,14 @@ program
 
         for (const csvPath of wordsCsvPaths) {
           process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
-          const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
-            const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
-            process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+          const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
+            if (phase === 'dict') {
+              const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
+              process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
+            } else {
+              const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+              process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+            }
           }, { force });
           process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${res.translatedCount} 個，跳過 ${res.skippedCount} 個`)}\n`);
         }

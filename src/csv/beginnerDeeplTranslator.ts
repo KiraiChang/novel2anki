@@ -154,22 +154,28 @@ async function fetchDefinitionFromFreeDict(
 
 // ── 對外介面：MW 優先，失敗則 fallback Free Dictionary ─────────────────────────
 
-async function fetchEnglishDefinition(word: string, pos?: string): Promise<string | null> {
+export type DictSource = 'MW' | 'free' | 'fallback';
+
+async function fetchEnglishDefinition(
+  word: string,
+  pos?: string,
+): Promise<{ def: string; source: DictSource }> {
   const targetPOS = pos ? normalizePOS(pos) : null;
   const mwKey = process.env.MW_API_KEY;
 
   if (mwKey) {
     try {
       const def = await fetchDefinitionFromMW(word, targetPOS, mwKey);
-      if (def) return def;
+      if (def) return { def, source: 'MW' };
     } catch { /* fallthrough to free dict */ }
   }
 
   try {
-    return await fetchDefinitionFromFreeDict(word, targetPOS);
-  } catch {
-    return null;
-  }
+    const def = await fetchDefinitionFromFreeDict(word, targetPOS);
+    if (def) return { def, source: 'free' };
+  } catch { /* fallthrough to word itself */ }
+
+  return { def: word, source: 'fallback' };
 }
 
 // ── 批次翻譯工具 ─────────────────────────────────────────────────────────────
@@ -260,7 +266,12 @@ export interface TranslateResult {
 export async function translateBeginnerWordsCsv(
   csvPath: string,
   config: DeepLConfig,
-  onProgress?: (current: number, total: number, phase: 'dict' | 'deepl' | 'write') => void,
+  onProgress?: (
+    current: number,
+    total: number,
+    phase: 'dict' | 'deepl' | 'write',
+    meta?: { source?: DictSource; word?: string },
+  ) => void,
   options?: { force?: boolean },
 ): Promise<TranslateResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
@@ -289,9 +300,9 @@ export async function translateBeginnerWordsCsv(
   const posList = needTranslation.map(({ cols }) => get(cols, 'pos'));
   const englishDefs: string[] = [];
   for (let i = 0; i < lemmas.length; i++) {
-    onProgress?.(i + 1, lemmas.length, 'dict');
-    const def = await fetchEnglishDefinition(lemmas[i], posList[i]);
-    englishDefs.push(def ?? lemmas[i]);
+    const { def, source } = await fetchEnglishDefinition(lemmas[i], posList[i]);
+    englishDefs.push(def);
+    onProgress?.(i + 1, lemmas.length, 'dict', { source, word: lemmas[i] });
   }
 
   // Phase 2：DeepL 批次翻譯
