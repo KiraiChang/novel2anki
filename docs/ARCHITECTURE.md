@@ -99,13 +99,16 @@ beginnerExporter.ts
 
     translateBeginnerWordsCsv(csvPath, config, onProgress, { force? })
 
-      Phase 1 — 字典查詢（Free Dictionary API）
+      Phase 1 — 字典查詢（MW 優先，Free Dictionary 為 fallback）
         for each lemma:
-          GET dictionaryapi.dev/api/v2/entries/en/{lemma}
-          ├─ normalizePOS(pos)  CSV 詞性 → API partOfSpeech（小寫）
-          ├─ 優先找符合 POS 的意義
-          ├─ isUsable(def)  排除短句 / See… / Compare… / 含括弧 POS 的交叉參照
-          └─ fallback → 同詞第一可用意義 → 或詞彙本身（字典無收錄時）
+          normalizePOS(pos)  CSV 詞性 → API 詞性字串（小寫）
+          ① 若設定 MW_API_KEY：
+               GET dictionaryapi.com/…/{lemma}?key=…
+               找符合 POS 的 entry → shortdef[0]（isUsableMW 過濾 see/compare 開頭）
+          ② MW 失敗或無 key：
+               GET dictionaryapi.dev/api/v2/entries/en/{lemma}
+               找符合 POS 的 meaning → definitions[0]（isUsableFree 過濾交叉參照）
+          fallback → 同詞第一可用意義 → 或詞彙本身（兩個 API 皆無收錄時）
 
       Phase 2 — DeepL 批次翻譯（目標語言：zh-HANT 繁體中文）
         交錯排列送入：[def1, sent1, def2, sent2, …, defN, sentN]
@@ -155,7 +158,7 @@ beginnerExporter.ts
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
 | 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（7 欄翻譯用）+ 分割版 words CSV |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[] |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① Free Dict API 取英文定義（POS 優先比對 + `isUsable` 過濾交叉參照）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
 
 ## 核心型別
 
@@ -215,6 +218,6 @@ interface WordToken {
 | `chalk` | 終端彩色輸出 |
 | `dotenv` | 載入 `.env` 環境變數 |
 | `deepl-node` | DeepL 官方 SDK，`--deepl` / `--deepl-force` 模式批次翻譯（目標語言 `zh-HANT`） |
-| `fetch()` | Node 18+ 內建，Ollama REST API 呼叫與 Free Dictionary API 查詢（不引入新套件） |
+| `fetch()` | Node 18+ 內建，呼叫 Ollama REST API、Merriam-Webster API、Free Dictionary API（不引入新套件） |
 | `compromise` | 純 JS NLP，tokenize / POS tagging（全句上下文，提供 verbs/nouns/adjectives 詞性標記） |
 | `wink-lemmatizer` | 英文詞形還原，補強 compromise 不處理的形容詞比較級/最高級（faster→fast、best→good、worst→bad） |

@@ -18,6 +18,17 @@
 
 ---
 
+### [STEP-010] 字典 API 升級：Merriam-Webster 作為主要來源
+**狀態**：已完成
+**目標**：提升 `--deepl` 翻譯時英文定義的品質，以 MW Collegiate API（`shortdef` 欄位）取代 Wiktionary 資料，原 Free Dictionary API 降為 fallback。
+
+1. [x] `src/csv/beginnerDeeplTranslator.ts`：拆出 `fetchDefinitionFromMW()`（MW API，`isUsableMW` 過濾）與 `fetchDefinitionFromFreeDict()`（原邏輯，`isUsableFree` 過濾），`fetchEnglishDefinition()` 改為有 `MW_API_KEY` 時先呼叫 MW，失敗再呼叫 Free Dict
+2. [x] `.env.example`：補 `MW_API_KEY` 欄位與申請連結（`dictionaryapi.com/register`）
+
+**備注**：MW API 免費方案每日 1,000 次查詢，100 個詞的翻譯批次消耗 100 次，一般使用不會超出。MW `shortdef` 為人工編輯的精簡定義，無交叉參照符號（`{bc}`、`{sx|…}`），可直接送 DeepL 翻譯。
+
+---
+
 ### [STEP-009] NLP 詞形還原升級：compromise → wink-lemmatizer
 **狀態**：已完成
 **目標**：補強 compromise 完全不處理形容詞比較級/最高級的缺口，提升 lemma 品質，讓 CEFR 查詢與覆蓋率統計更準確。

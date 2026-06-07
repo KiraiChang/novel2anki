@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { DeepLConfig, batchTranslate } from '../cards/deeplTranslator';
 
+const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/collegiate/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 const DEEPL_FREE_LIMIT = 500_000;
 const DEEPL_PRO_PRICE_PER_MILLION = 25;
@@ -59,11 +60,7 @@ function splitLines(content: string): string[] {
 
 // ── 字典 API ─────────────────────────────────────────────────────────────────
 
-interface DictEntry {
-  meanings: Array<{ partOfSpeech: string; definitions: Array<{ definition: string }> }>;
-}
-
-// CSV POS → Free Dictionary API partOfSpeech（小寫）
+// CSV POS → 字典 API 詞性字串（小寫）
 function normalizePOS(pos: string): string | null {
   const map: Record<string, string> = {
     noun: 'noun', verb: 'verb', adjective: 'adjective', adverb: 'adverb',
@@ -73,42 +70,103 @@ function normalizePOS(pos: string): string | null {
   return map[pos.toLowerCase()] ?? null;
 }
 
-async function fetchEnglishDefinition(word: string, pos?: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${DICT_API}/${encodeURIComponent(word)}`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as DictEntry[];
+// ── Merriam-Webster Collegiate API ───────────────────────────────────────────
 
-    const targetPOS = pos ? normalizePOS(pos) : null;
+interface MWEntry {
+  fl?: string;        // functional label（詞性），如 "noun" / "verb"
+  shortdef?: string[]; // 簡短定義列表
+}
 
-    // 判斷定義是否適合翻譯（排除交叉參照短句與含括弧 POS 的定義）
-    const isUsable = (def: string) =>
-      def.length >= 10 &&
-      !/^(See|Compare|Alternative|Synonym|Archaic)/i.test(def.trim()) &&
-      !/\((verb|noun|adjective|adverb|pronoun)\)/i.test(def);
+// 排除交叉參照類短句（MW shortdef 通常已乾淨，但保留保護）
+const isUsableMW = (def: string) =>
+  def.length >= 10 && !/^(see|compare|synonym of)/i.test(def.trim());
 
-    // 優先找符合 POS 且可用的定義
-    if (targetPOS) {
-      for (const entry of data) {
-        for (const meaning of entry.meanings) {
-          if (meaning.partOfSpeech === targetPOS) {
-            const def = meaning.definitions.find(d => isUsable(d.definition))?.definition ?? null;
-            if (def) return `(${meaning.partOfSpeech}) ${def}`;
-          }
+async function fetchDefinitionFromMW(
+  word: string,
+  targetPOS: string | null,
+  apiKey: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `${MW_API}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
+    { signal: AbortSignal.timeout(5000) },
+  );
+  if (!res.ok) return null;
+  const raw = await res.json() as (MWEntry | string)[];
+
+  // MW 找不到詞時回傳建議字串陣列，過濾掉
+  const entries = raw.filter((e): e is MWEntry => typeof e === 'object' && Array.isArray(e.shortdef) && e.shortdef.length > 0);
+  if (entries.length === 0) return null;
+
+  // 優先找符合 POS 的 entry
+  if (targetPOS) {
+    const match = entries.find(e => e.fl === targetPOS);
+    const def = match?.shortdef?.find(isUsableMW);
+    if (def) return `(${match!.fl}) ${def}`;
+  }
+
+  // Fallback 到第一筆 entry 的第一個可用定義
+  for (const entry of entries) {
+    const def = entry.shortdef?.find(isUsableMW);
+    if (def) return `(${entry.fl ?? 'unknown'}) ${def}`;
+  }
+  return null;
+}
+
+// ── Free Dictionary API（fallback）────────────────────────────────────────────
+
+interface FreeDictEntry {
+  meanings: Array<{ partOfSpeech: string; definitions: Array<{ definition: string }> }>;
+}
+
+const isUsableFree = (def: string) =>
+  def.length >= 10 &&
+  !/^(See|Compare|Alternative|Synonym|Archaic)/i.test(def.trim()) &&
+  !/\((verb|noun|adjective|adverb|pronoun)\)/i.test(def);
+
+async function fetchDefinitionFromFreeDict(
+  word: string,
+  targetPOS: string | null,
+): Promise<string | null> {
+  const res = await fetch(`${DICT_API}/${encodeURIComponent(word)}`, {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) return null;
+  const data = await res.json() as FreeDictEntry[];
+
+  if (targetPOS) {
+    for (const entry of data) {
+      for (const meaning of entry.meanings) {
+        if (meaning.partOfSpeech === targetPOS) {
+          const def = meaning.definitions.find(d => isUsableFree(d.definition))?.definition ?? null;
+          if (def) return `(${meaning.partOfSpeech}) ${def}`;
         }
       }
     }
-
-    // 找不到符合詞性則 fallback 到第一個可用意義
-    for (const entry of data) {
-      for (const meaning of entry.meanings) {
-        const def = meaning.definitions.find(d => isUsable(d.definition))?.definition ?? null;
-        if (def) return `(${meaning.partOfSpeech}) ${def}`;
-      }
+  }
+  for (const entry of data) {
+    for (const meaning of entry.meanings) {
+      const def = meaning.definitions.find(d => isUsableFree(d.definition))?.definition ?? null;
+      if (def) return `(${meaning.partOfSpeech}) ${def}`;
     }
-    return null;
+  }
+  return null;
+}
+
+// ── 對外介面：MW 優先，失敗則 fallback Free Dictionary ─────────────────────────
+
+async function fetchEnglishDefinition(word: string, pos?: string): Promise<string | null> {
+  const targetPOS = pos ? normalizePOS(pos) : null;
+  const mwKey = process.env.MW_API_KEY;
+
+  if (mwKey) {
+    try {
+      const def = await fetchDefinitionFromMW(word, targetPOS, mwKey);
+      if (def) return def;
+    } catch { /* fallthrough to free dict */ }
+  }
+
+  try {
+    return await fetchDefinitionFromFreeDict(word, targetPOS);
   } catch {
     return null;
   }

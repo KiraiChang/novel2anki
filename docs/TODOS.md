@@ -7,8 +7,7 @@
 - [x] NLP 前處理管線：compromise tokenize → lemma → 詞頻 → CEFR 分級，提供 `vocabSuggestions` 給所有生成模式（`src/nlp/`）
 ## 初學者模式（`--beginner`）
 
-- [ ] **升級字典 API**（`src/csv/beginnerDeeplTranslator.ts`）：目前使用 `dictionaryapi.dev`（Wiktionary 資料），部分詞彙的第一筆定義偏向冷僻或古義（如 `above` → "Of heaven"、`course` → "to flow"）。建議改用 Merriam-Webster Collegiate Dictionary API（免費，1000 req/day，需申請 key：`dictionaryapi.com`）或 WordsAPI（RapidAPI 免費層，2500 req/day）。升級後配合現有 POS 比對與 `isUsable` 過濾，可大幅提升英文定義品質。
-  - **相關設計**：`fetchEnglishDefinition(word, pos)` 已支援 POS 優先比對，直接替換 API 呼叫即可；新 key 可透過環境變數 `MW_API_KEY` / `WORDS_API_KEY` 傳入。
+- [x] **升級字典 API**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-07）：已接入 Merriam-Webster Collegiate Dictionary API（`MW_API_KEY` 環境變數，1000 req/day 免費）作為主要字典來源，原 `dictionaryapi.dev` 降為 fallback。MW 的 `shortdef` 欄位定義精確、無交叉參照干擾，品質大幅優於 Wiktionary 資料。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併

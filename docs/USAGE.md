@@ -5,7 +5,11 @@
 ```bash
 # 1. 設定 API Key
 cp .env.example .env
-# 編輯 .env，填入 ANTHROPIC_API_KEY=sk-ant-...
+# 編輯 .env，依需要填入：
+#   ANTHROPIC_API_KEY=sk-ant-...        ← 標準模式必填
+#   DEEPL_API_KEY=your-deepl-key        ← --deepl / --deepl-force 必填
+#   MW_API_KEY=your-mw-key              ← 選用，有設定時字典定義品質更佳
+#                                          申請：https://dictionaryapi.com/register/index
 
 # 2. 不用 API 先測試整條流程（mock 模式，同時產生 CSV）
 npx ts-node src/index.ts novel.epub --mock --chunks 3
@@ -281,6 +285,8 @@ npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --de
 npx ts-node src/index.ts output/ -d "Novel" --flash
 ```
 
+> **字典來源**：翻譯前會先從字典 API 取得英文定義再送 DeepL。有設定 `MW_API_KEY` 時使用 Merriam-Webster（品質較佳），否則使用 Free Dictionary API（dictionaryapi.dev）作為 fallback。
+>
 > `--deepl` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--deepl-force`：
 >
 > ```bash
