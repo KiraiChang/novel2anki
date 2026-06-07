@@ -19,6 +19,10 @@ import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToFlashHtml, exportReadingToFlashHtml, exportToComparisonHtml } from './html/exporter';
 import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv/exporter';
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
+import { extractBeginnerVocab } from './nlp/beginnerExtractor';
+import { formatCoverageReport } from './nlp/coverageReport';
+import { exportBeginnerTokensToCsv } from './csv/beginnerExporter';
+import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv } from './csv/beginnerImporter';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -46,6 +50,10 @@ program
   .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
   .option('--reading', '讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡')
   .option('--flash', '額外輸出單字卡 HTML（頁籤切換 + 上一張 / 下一張 + 翻面）')
+  .option('--beginner', '初學者模式：掃描全書，擷取達目標覆蓋率所需詞彙，輸出逐詞 CSV 供翻譯後合併成字卡')
+  .option('--beginner-target <百分比>', '覆蓋率目標，0-100（預設：95）', '95')
+  .option('--beginner-min-freq <次數>', '詞彙最低出現次數門檻（預設：2）', '2')
+  .option('--beginner-include-a1', '包含 A1 基礎詞彙（預設：排除）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -59,6 +67,10 @@ program
     splitSize?: string;
     reading?: boolean;
     flash?: boolean;
+    beginner?: boolean;
+    beginnerTarget?: string;
+    beginnerMinFreq?: string;
+    beginnerIncludeA1?: boolean;
   }) => {
     const needsApiKey = !options.mock && !options.offline && !options.deepl;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
@@ -101,6 +113,35 @@ program
         console.error(chalk.red('錯誤：找不到任何 CSV 檔案。'));
         process.exit(1);
       }
+
+      // 初學者字彙 CSV（含 token_id 欄位）：合併翻譯後轉為 VocabCard
+      if (csvPaths.length === 1 && isBeginnerCsv(csvPaths[0])) {
+        console.log(chalk.yellow(`正在讀取初學者字彙 CSV：${csvPaths[0]}`));
+        const tokens = importBeginnerTokens(csvPaths[0]);
+        const translated = tokens.filter(t => t.definition_zh.trim().length > 0);
+        console.log(chalk.green(`✓ 共讀取 ${tokens.length} 個詞彙，已翻譯 ${translated.length} 個`));
+        if (translated.length === 0) {
+          console.error(chalk.red('錯誤：CSV 中沒有已填入 definition_zh 的詞彙。'));
+          process.exit(1);
+        }
+        const vocabCards = mergeTokensToVocabCards(tokens);
+        const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
+        console.log('');
+        console.log(chalk.yellow('正在匯出檔案...'));
+        const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+        const htmlPath = exportToHtml(csvCards, deckName, options.output);
+        console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
+        console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
+        if (options.flash) {
+          const flashPath = exportToFlashHtml(csvCards, deckName, options.output);
+          console.log(chalk.green(`✓ 單字卡 HTML：${flashPath}`));
+        }
+        console.log('');
+        console.log(chalk.cyan('· 匯入 Anki：開啟 Anki → 檔案 → 匯入，選取 .apkg 檔案'));
+        console.log(chalk.cyan('· 直接預覽：用瀏覽器開啟 .html 檔案'));
+        return;
+      }
+
       console.log(chalk.yellow(`正在讀取 ${csvPaths.length} 個 CSV...`));
       csvPaths.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
       const csvCards = importFromCsvFiles(csvPaths);
@@ -137,6 +178,37 @@ program
     let chunks = await extractor(pdfFile);
     if (isFinite(maxChunks)) chunks = chunks.slice(0, maxChunks);
     console.log(chalk.green(`✓ 共切出 ${chunks.length} 個段落區塊`));
+
+    // ── 初學者覆蓋率模式 ─────────────────────────────────────────────
+    if (options.beginner) {
+      const targetCoverage = parseFloat(options.beginnerTarget ?? '95') / 100;
+      const minFreq = parseInt(options.beginnerMinFreq ?? '2', 10);
+
+      process.stdout.write(chalk.yellow('\n正在分析全書詞彙覆蓋率（初學者模式）... 段落 0/' + chunks.length));
+      const result = extractBeginnerVocab(chunks, deckName, {
+        targetCoverage,
+        minFreq,
+        includeA1: options.beginnerIncludeA1 ?? false,
+        onProgress: (current, total) => {
+          process.stdout.write(chalk.yellow(`\r正在分析全書詞彙覆蓋率（初學者模式）... 段落 ${current}/${total}`));
+        },
+      });
+      process.stdout.write(`\r${chalk.green(`✓ 詞彙掃描完成（${chunks.length} 段落）                    `)}\n`);
+
+      console.log(formatCoverageReport(result.report));
+
+      const csvPath = exportBeginnerTokensToCsv(
+        result.tokens,
+        deckName,
+        options.output,
+        result.report.recommended95Cutoff
+      );
+      console.log(chalk.green(`✓ 初學者字彙清單：${csvPath}`));
+      console.log(chalk.gray(`  共匯出 ${result.report.recommended95Cutoff} 個詞彙（達 ${Math.round(targetCoverage * 100)}% 覆蓋率）`));
+      console.log(chalk.gray(`  填入 definition_zh 後可執行：`));
+      console.log(chalk.gray(`  npx ts-node src/index.ts ${csvPath} -d "${deckName}"`));
+      return;
+    }
 
     // NLP 前處理管線（逐段落顯示進度）
     const enrichedChunks: EnrichedChunk[] = [];

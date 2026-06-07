@@ -28,3 +28,38 @@ export interface EnrichedChunk {
 }
 
 export const EMPTY_CHUNK_NLP: ChunkNLP = { tokens: [], vocabSuggestions: [] };
+
+export interface WordOccurrence {
+  id: string;           // "chunk042_sent3_tok7"
+  chunkIndex: number;
+  chapter?: string;
+  sentence: string;
+  sentenceIndex: number;
+  tokenIndex: number;
+}
+
+export interface GlobalFreqEntry {
+  lemma: string;
+  original: string;     // most common surface form
+  pos: string;
+  cefrLevel: CefrLevel | 'UNKNOWN';
+  globalCount: number;
+  occurrences: WordOccurrence[];
+}
+
+export type GlobalFreqMap = Map<string, GlobalFreqEntry>;
+
+export interface WordToken {
+  id: string;               // occurrence ID of best sentence
+  lemma: string;
+  original: string;
+  pos: string;
+  cefrLevel: CefrLevel | 'UNKNOWN';
+  globalFrequency: number;
+  coverageRank: number;     // 1 = most frequent
+  bestSentence: string;
+  bestSentenceScore: number;
+  sourceChunkIndex: number;
+  sourceChapter?: string;
+  definition_zh: string;    // empty initially, filled after translation
+}
