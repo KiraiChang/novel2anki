@@ -18,6 +18,20 @@
 
 ---
 
+### [STEP-008] DeepL 翻譯品質修正與強制重翻功能
+**狀態**：已完成
+**目標**：修正 DeepL 輸出為簡體中文的語言代碼錯誤，加入 `--deepl-force` 讓使用者不需手動清除 CSV 即可強制重新翻譯。
+
+1. [x] `src/cards/deeplTranslator.ts`：目標語言由 `'zh'`（簡體）改為 `'zh-HANT'`（繁體中文）；`translateToZh` 與 `batchTranslate` 皆修正
+2. [x] `src/csv/beginnerDeeplTranslator.ts`：加入批次結果數量 assertion（`allTranslated.length !== allTexts.length` 時拋出明確錯誤）；`estimateBeginnerTranslate` 與 `translateBeginnerWordsCsv` 皆加入 `options?: { force?: boolean }` 參數
+3. [x] `src/index.ts`：新增 `--deepl-force` CLI option；CSV 輸入分支與 `--beginner --deepl` 分支皆支援；force 模式跳過「已翻譯阻斷」並顯示 `⚡ 強制重新翻譯模式` 提示
+
+**備注**：
+- `'zh'` 在 deepl-node 的 `TargetLanguageCode` 型別屬於 `CommonLanguageCode`，為簡體中文；繁體正確代碼為 `'zh-HANT'`（在 `TargetLanguageCode` 特定擴充集中）
+- DeepL 批次翻譯（array 模式）會對同 batch 內的文字進行上下文關聯推斷，導致前後相鄰定義可能互相污染（例如 `fear` 被錯誤翻為「男人」）；force 重新翻譯可修正此類問題，但批次污染屬 DeepL API 行為限制，無法從程式面完全消除
+
+---
+
 ### [STEP-007] 初學者模式擴充：分割輸出、例句中文、DeepL 自動翻譯
 **狀態**：已完成
 **目標**：強化初學者模式的翻譯工作流程。支援分割 words CSV、新增例句中文翻譯欄、整合 DeepL API 一鍵自動翻譯（含費用估算確認）。

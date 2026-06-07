@@ -133,7 +133,7 @@ beginnerExporter.ts
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
 | 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（7 欄翻譯用）+ 分割版 words CSV |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[] |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 估算字元費用、三階段批次翻譯（字典 API → DeepL → 覆寫 CSV） |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 估算字元費用、三階段批次翻譯（字典 API → DeepL → 覆寫 CSV）；支援 `force` 模式全列重譯 |
 
 ## 核心型別
 

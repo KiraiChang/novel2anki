@@ -47,6 +47,7 @@ program
   .option('--offline', '離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）')
   .option('--model <模型名稱>', '指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL 環境變數）')
   .option('--deepl', '使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）')
+  .option('--deepl-force', '強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）')
   .option('--split-chapters', '將 CSV 依章節分割輸出（mock 模式）')
   .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
   .option('--reading', '讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡')
@@ -65,6 +66,7 @@ program
     offline?: boolean;
     model?: string;
     deepl?: boolean;
+    deeplForce?: boolean;
     splitChapters?: boolean;
     splitSize?: string;
     reading?: boolean;
@@ -75,9 +77,9 @@ program
     beginnerIncludeA1?: boolean;
     beginnerSplit?: string;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
-      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl 旗標以不使用 Claude API'));
+      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
     }
 
@@ -123,17 +125,19 @@ program
       if (beginnerWordsCsvs.length > 0) {
         // DeepL 自動翻譯：翻譯後覆寫 CSV 並退出，不產生 APKG/HTML
         // 使用者等所有分割檔翻譯完畢後再整目錄合併產出字卡
-        if (options.deepl) {
+        if (options.deepl || options.deeplForce) {
           const deeplCfg = loadDeepLConfig();
-          const est = estimateBeginnerTranslate(beginnerWordsCsvs);
+          const force = !!options.deeplForce;
+          const est = estimateBeginnerTranslate(beginnerWordsCsvs, { force });
           console.log('');
+          if (force) console.log(chalk.magenta('⚡ 強制重新翻譯模式（--deepl-force）'));
           console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
 
-          // 已全部翻譯：阻斷並提示清除方式
-          if (est.untranslatedCount === 0) {
+          // 已全部翻譯且非強制模式：阻斷並提示清除方式
+          if (!force && est.untranslatedCount === 0) {
             console.log(chalk.yellow('⚠ 此 CSV 已完整翻譯，無法重複提交。'));
-            console.log(chalk.gray('  若需重新翻譯，請先清除 CSV 中 definition_zh'));
-            console.log(chalk.gray('  （與 context_sentence_zh）欄位的內容後再重新執行。'));
+            console.log(chalk.gray('  若需重新翻譯，請加上 --deepl-force 強制覆寫，'));
+            console.log(chalk.gray('  或手動清除 CSV 中 definition_zh / context_sentence_zh 欄位後再執行。'));
             process.exit(1);
           }
 
@@ -152,7 +156,7 @@ program
             const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
               const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
               process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
-            });
+            }, { force });
             process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
           }
 
@@ -295,10 +299,12 @@ program
       }
 
       // DeepL 自動翻譯
-      if (options.deepl) {
+      if (options.deepl || options.deeplForce) {
         const deeplCfg = loadDeepLConfig();
-        const est = estimateBeginnerTranslate(wordsCsvPaths);
+        const force = !!options.deeplForce;
+        const est = estimateBeginnerTranslate(wordsCsvPaths, { force });
         console.log('');
+        if (force) console.log(chalk.magenta('⚡ 強制重新翻譯模式（--deepl-force）'));
         console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
 
         const confirmed = await new Promise<boolean>(resolve => {
@@ -319,7 +325,7 @@ program
           const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
             const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
             process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
-          });
+          }, { force });
           process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${res.translatedCount} 個，跳過 ${res.skippedCount} 個`)}\n`);
         }
 

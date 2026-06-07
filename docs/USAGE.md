@@ -32,6 +32,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --offline               離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）
   --model <模型名稱>      指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL）
   --deepl                 使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）
+  --deepl-force           強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）
   --split-chapters        將 CSV 依章節分割輸出（搭配 --mock）
   --split-size <數量>     將 CSV 依每 N 個 chunk 分割輸出（搭配 --mock）
   --reading               讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡
@@ -280,7 +281,15 @@ npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --de
 npx ts-node src/index.ts output/ -d "Novel" --flash
 ```
 
-> `--deepl` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。
+> `--deepl` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--deepl-force`：
+>
+> ```bash
+> # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
+> npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl-force
+>
+> # 強制重新翻譯整個目錄的所有 words CSV
+> npx ts-node src/index.ts output/ -d "Novel" --deepl-force
+> ```
 
 ### 輸出的兩個 CSV
 

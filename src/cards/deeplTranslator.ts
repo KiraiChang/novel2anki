@@ -12,13 +12,13 @@ export function loadDeepLConfig(): DeepLConfig {
 
 export async function translateToZh(text: string, config: DeepLConfig): Promise<string> {
   const translator = new deepl.Translator(config.apiKey);
-  const result = await translator.translateText(text, null, 'zh' as deepl.TargetLanguageCode);
+  const result = await translator.translateText(text, null, 'zh-HANT');
   return result.text;
 }
 
 export async function batchTranslate(texts: string[], config: DeepLConfig): Promise<string[]> {
   if (texts.length === 0) return [];
   const translator = new deepl.Translator(config.apiKey);
-  const results = await translator.translateText(texts, null, 'zh' as deepl.TargetLanguageCode);
+  const results = await translator.translateText(texts, null, 'zh-HANT');
   return (Array.isArray(results) ? results : [results]).map(r => r.text);
 }

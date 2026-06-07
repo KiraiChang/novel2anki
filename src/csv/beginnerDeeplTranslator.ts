@@ -105,7 +105,10 @@ export interface BeginnerTranslateEstimate {
   totalCharsEstimate: number;
 }
 
-export function estimateBeginnerTranslate(csvPaths: string[]): BeginnerTranslateEstimate {
+export function estimateBeginnerTranslate(
+  csvPaths: string[],
+  options?: { force?: boolean },
+): BeginnerTranslateEstimate {
   let untranslatedCount = 0;
   let sentenceChars = 0;
 
@@ -121,7 +124,7 @@ export function estimateBeginnerTranslate(csvPaths: string[]): BeginnerTranslate
     for (let i = 1; i < lines.length; i++) {
       const cols = parseRow(lines[i]);
       const get = (col: string) => cols[idx[col]] ?? '';
-      if (!get('definition_zh').trim()) {
+      if (options?.force || !get('definition_zh').trim()) {
         untranslatedCount++;
         sentenceChars += get('context_sentence').length;
       }
@@ -165,6 +168,7 @@ export async function translateBeginnerWordsCsv(
   csvPath: string,
   config: DeepLConfig,
   onProgress?: (current: number, total: number, phase: 'dict' | 'deepl' | 'write') => void,
+  options?: { force?: boolean },
 ): Promise<TranslateResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -177,10 +181,10 @@ export async function translateBeginnerWordsCsv(
   // 解析所有資料列
   const rows = lines.slice(1).map(l => parseRow(l));
 
-  // 找出需要翻譯的列索引
+  // 找出需要翻譯的列索引（force 模式對全部列重新翻譯）
   const needTranslation = rows
     .map((cols, i) => ({ i, cols }))
-    .filter(({ cols }) => !get(cols, 'definition_zh').trim());
+    .filter(({ cols }) => options?.force || !get(cols, 'definition_zh').trim());
 
   const skippedCount = rows.length - needTranslation.length;
   if (needTranslation.length === 0) {
@@ -204,6 +208,12 @@ export async function translateBeginnerWordsCsv(
     onProgress?.(done, total, 'deepl');
   });
 
+  if (allTranslated.length !== allTexts.length) {
+    throw new Error(
+      `DeepL 回傳數量不符：送出 ${allTexts.length} 筆，收到 ${allTranslated.length} 筆，無法繼續對齊寫入。`,
+    );
+  }
+
   const defZh = allTranslated.slice(0, englishDefs.length);
   const sentZh = allTranslated.slice(englishDefs.length);
 
@@ -217,7 +227,7 @@ export async function translateBeginnerWordsCsv(
       rows[i].push('');
     }
     if (defZhColIdx !== undefined) rows[i][defZhColIdx] = defZh[j] ?? '';
-    if (sentZhColIdx !== undefined && !rows[i][sentZhColIdx]?.trim()) {
+    if (sentZhColIdx !== undefined && (options?.force || !rows[i][sentZhColIdx]?.trim())) {
       rows[i][sentZhColIdx] = sentZh[j] ?? '';
     }
   });
