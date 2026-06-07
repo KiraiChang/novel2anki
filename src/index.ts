@@ -128,28 +128,34 @@ program
           const est = estimateBeginnerTranslate(beginnerWordsCsvs);
           console.log('');
           console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
-          if (est.untranslatedCount === 0) {
-            console.log(chalk.gray('所有詞彙已翻譯，CSV 無需更新。'));
-          } else {
-            const confirmed = await new Promise<boolean>(resolve => {
-              const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-              rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
-                rl.close();
-                resolve(ans.trim().toLowerCase() !== 'n');
-              });
-            });
-            if (!confirmed) { console.log(chalk.gray('已取消。')); process.exit(0); }
-            console.log('');
 
-            for (const csvPath of beginnerWordsCsvs) {
-              process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
-              const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
-                const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
-                process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
-              });
-              process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
-            }
+          // 已全部翻譯：阻斷並提示清除方式
+          if (est.untranslatedCount === 0) {
+            console.log(chalk.yellow('⚠ 此 CSV 已完整翻譯，無法重複提交。'));
+            console.log(chalk.gray('  若需重新翻譯，請先清除 CSV 中 definition_zh'));
+            console.log(chalk.gray('  （與 context_sentence_zh）欄位的內容後再重新執行。'));
+            process.exit(1);
           }
+
+          const confirmed = await new Promise<boolean>(resolve => {
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
+              rl.close();
+              resolve(ans.trim().toLowerCase() !== 'n');
+            });
+          });
+          if (!confirmed) { console.log(chalk.gray('已取消。')); process.exit(0); }
+          console.log('');
+
+          for (const csvPath of beginnerWordsCsvs) {
+            process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
+            const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
+              const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+              process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+            });
+            process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
+          }
+
           console.log('');
           const outputDir = isDirectory ? pdfFile : path.dirname(beginnerWordsCsvs[0]);
           console.log(chalk.cyan('翻譯已寫回 CSV。所有分割檔翻譯完成後，執行以下指令產生字卡：'));
