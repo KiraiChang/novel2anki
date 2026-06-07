@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { DeepLConfig, batchTranslate } from '../cards/deeplTranslator';
+import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -275,7 +276,7 @@ export async function translateBeginnerWordsCsv(
     phase: 'dict' | 'deepl' | 'write',
     meta?: { source?: DictSource; word?: string },
   ) => void,
-  options?: { force?: boolean },
+  options?: { force?: boolean; prebuiltNames?: Set<string> },
 ): Promise<TranslateResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -313,7 +314,13 @@ export async function translateBeginnerWordsCsv(
   // DeepL 批次模式會以同批次的文字互為上下文；相鄰排列讓 DeepL
   // 在翻譯 def_i 時能參考 sent_i 的語境，選出正確詞義。
   const sentences = needTranslation.map(({ cols }) => get(cols, 'context_sentence'));
-  const allTexts = englishDefs.flatMap((def, i) => [def, sentences[i]]);
+
+  // NER 人名保護：優先使用預建人名表（--beginner 階段產生），否則從本批句子動態偵測
+  const properNouns = options?.prebuiltNames ?? buildProperNounSet(sentences);
+  const nameMaps = sentences.map(s => protectNames(s, properNouns));
+  const protectedSentences = nameMaps.map(m => m.text);
+
+  const allTexts = englishDefs.flatMap((def, i) => [def, protectedSentences[i]]);
   onProgress?.(0, allTexts.length, 'deepl');
   const allTranslated = await batchTranslateChunked(allTexts, config, (done, total) => {
     onProgress?.(done, total, 'deepl');
@@ -325,9 +332,11 @@ export async function translateBeginnerWordsCsv(
     );
   }
 
-  // 偶數索引 = 定義，奇數索引 = 例句
+  // 偶數索引 = 定義，奇數索引 = 例句（翻譯後還原人名佔位符）
   const defZh = allTranslated.filter((_, i) => i % 2 === 0);
-  const sentZh = allTranslated.filter((_, i) => i % 2 === 1);
+  const sentZh = allTranslated
+    .filter((_, i) => i % 2 === 1)
+    .map((t, i) => restoreNames(t, nameMaps[i].restoreMap));
 
   // Phase 3：填回資料列
   onProgress?.(0, 1, 'write');

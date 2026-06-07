@@ -8,6 +8,7 @@
 ## 初學者模式（`--beginner`）
 
 - [x] **升級字典 API**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-07）：已接入 Merriam-Webster Learner's Dictionary API（`MW_API_KEY` 環境變數，1000 req/day 免費，端點 `/learners/json`）作為主要字典來源，原 `dictionaryapi.dev` 降為 fallback。MW 的 `shortdef` 欄位定義精確、無交叉參照干擾，品質大幅優於 Wiktionary 資料。翻譯進度列同步顯示 `[MW]` / `[Free]` / `[fallback]` 標記。
+- [x] **預建人名表**（`src/nlp/nameProtector.ts`、`src/csv/beginnerExporter.ts`，2026-06-07）：`--beginner` 掃描完成後，從所有 `bestSentence` 以 NER（compromise + mid-sentence 大寫詞）偵測專有名詞，輸出 `*-beginner-names.txt`（純文字，一行一名詞，含說明注釋）。使用者可在翻譯前確認 / 新增 / 刪除。`--deepl` 翻譯時自動讀取同目錄的 `*-beginner-names.txt`，以預建名詞集保護人名（原動態偵測作 backward-compat fallback）。NER 函式抽離至 `src/nlp/nameProtector.ts` 共用模組。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併

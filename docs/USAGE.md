@@ -252,11 +252,21 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 
 ### 工作流程
 
+`--beginner` 掃描完成後，除了 CSV 外，還會輸出 `*-beginner-names.txt`（人名與專有名詞清單）。  
+可在翻譯前開啟確認 / 新增 / 刪除，翻譯時自動讀取，防止人名被 DeepL 誤譯（例如 "Pony" → "小馬"）。
+
 #### 手動翻譯
 
 ```bash
-# Step 1：掃描全書，輸出覆蓋率報告 + 兩個 CSV
+# Step 1：掃描全書，輸出覆蓋率報告 + CSV + 人名表
 npx ts-node src/index.ts novel.epub --beginner
+# 輸出：
+#   output/novel-beginner-words.csv   ← 待翻譯清單
+#   output/novel-beginner-names.txt   ← 人名表（可手動編輯）
+
+# Step 1.5（選用）：開啟 *-beginner-names.txt 確認人名清單
+#   - 刪除誤判的通稱（Brother、Captain 等）
+#   - 補充偵測漏掉的奇幻人名
 
 # Step 2：填入 *-beginner-words.csv 的 definition_zh 欄位
 #         （可選填 context_sentence_zh 補充例句中文翻譯）
@@ -265,21 +275,24 @@ npx ts-node src/index.ts novel.epub --beginner
 npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
 ```
 
-#### DeepL 翻譯（單一 words CSV）
+#### DeepL 翻譯
 
-`--deepl` 只負責翻譯並覆寫 CSV，**不產生 APKG / HTML**，讓你確認所有分割檔都翻譯完後再統一合併。
+`--deepl` 只負責翻譯並覆寫 CSV，**不產生 APKG / HTML**，讓你確認所有分割檔都翻譯完後再統一合併。  
+翻譯時自動讀取同目錄的 `*-beginner-names.txt`，以預建名詞集保護人名（無此檔案時動態偵測）。
 
 ```bash
-# Step 1：擷取（單一檔或分割）
+# Step 1：擷取（單一檔或分割），同時產生人名表
 npx ts-node src/index.ts novel.epub --beginner
 # 或分割版（每 100 個詞一個 CSV）
 npx ts-node src/index.ts novel.epub --beginner --beginner-split 100
+# 輸出：output/novel-beginner-names.txt  ← 可在此時編輯
 
-# Step 2：逐一翻譯各分割 CSV（翻譯結果直接寫回 CSV）
+# Step 2：整目錄翻譯（自動讀取 *-beginner-names.txt 保護人名）
 #         每次執行前顯示費用估算，輸入 [Y/n] 確認後才送出
+npx ts-node src/index.ts output/ -d "Novel" --deepl
+# 或逐一翻譯各分割 CSV
 npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl
 npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --deepl
-# ...（重複至全部完成）
 
 # Step 3：所有 CSV 翻譯完成後，整目錄合併產出最終字卡
 npx ts-node src/index.ts output/ -d "Novel" --flash
@@ -297,15 +310,16 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 > npx ts-node src/index.ts output/ -d "Novel" --deepl-force
 > ```
 
-### 輸出的兩個 CSV
+### 輸出檔案
 
 | 檔案 | 欄位數 | 用途 |
 |------|:---:|------|
 | `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
-| `*-beginner-words.csv` | 7 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
-| `*-beginner-words-part-NN.csv` | 7 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
+| `*-beginner-words.csv` | 8 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
+| `*-beginner-words-part-NN.csv` | 8 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
+| `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--deepl` 自動讀取 |
 
-**words CSV 欄位**：
+**words CSV 欄位**（8 欄）：
 
 | 欄位 | 說明 |
 |------|------|
@@ -313,6 +327,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `pos` | 詞性 |
 | `cefr_level` | CEFR 等級（A2–C2 / UNKNOWN） |
 | `coverage_rank` | 學習優先順序（1 = 最高頻，最先學） |
+| `global_frequency` | 全書出現次數 |
 | `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
 | `context_sentence_zh` | 例句中文翻譯（留空，可選填，字卡背面輔助理解） |
 | `definition_zh` | 繁體中文定義（留空，待翻譯） |

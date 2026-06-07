@@ -23,6 +23,8 @@
 
 - **字典 API 選用 Merriam-Webster Learner's Dictionary 作為主要來源**：Free Dictionary API（dictionaryapi.dev，Wiktionary 資料）的第一筆定義常為冷僻義（`above` adjective → "Of heaven; heavenly"）。MW Learner's API 的 `shortdef` 欄位為人工編輯的教學向定義，無需另行清理格式符號；免費方案 1000 req/day 已足夠使用（100 詞 = 100 次查詢）。**注意：dictionaryapi.com 上有多種字典產品（Collegiate、Learner's、Medical…），每個字典各有獨立 API key；填錯會收到 403 並靜默 fallback，現已加上 stderr 警告訊息。** 申請時需選擇 "Merriam-Webster's Learner's Dictionary"。設定 `MW_API_KEY` 後自動優先使用，未設定或查詢失敗時 fallback 到 Free Dictionary API，不影響既有流程。
 
+- **NER 人名保護：預建人名表流程**（`src/nlp/nameProtector.ts`、`src/csv/beginnerExporter.ts`）：DeepL 會把常見英文詞當人名使用的角色名音譯或誤譯（如 "Pony" → "小馬"）。解決方式：翻譯前將例句中的專有名詞換成 `__PERSON_N__` 佔位符，翻譯後再還原。**新流程（預建人名表）**：`--beginner` 掃描結束後，從所有 `bestSentence` 收集專有名詞，輸出到 `{slug}-beginner-names.txt`（純文字，一行一名詞，含說明注釋），使用者可在翻譯前手動確認、新增或刪除。`--deepl` 翻譯時自動讀取同目錄的 `*-beginner-names.txt`，以預建名詞集取代即時偵測（`translateBeginnerWordsCsv` 的 `prebuiltNames` 選項）。偵測策略：① compromise `.people()` + `#ProperNoun`；② mid-sentence 大寫詞（token 索引 > 0）。限制：若某人名在整書 bestSentence 中都只出現在句首且 compromise 未識別，則不出現在自動偵測結果中，使用者需手動加入人名檔。NER 相關函式（`buildProperNounSet`、`protectNames`、`restoreNames`、`saveNamesFile`、`loadNamesFile`）集中於 `nameProtector.ts`，供 exporter 與 translator 共用。
+
 - **`extractSentences` 以換行符切割防止詩節混入**（`src/nlp/globalFreqAnalyzer.ts`）：原本只在 `.!?` 後切句，書中詩節（如 `"The shining sword, the horse's run,\nThe bane of monsters all and one."`）整段被視為單一句子並帶著 `\n` 存入 occurrence。改為同時在 `\n+` 處切割後，詩行各自成為獨立候選句（不含換行符），Sentence Mining 評分後分數低於正常敘述句而不被選中。修正後詩/分行比例從 3.1% 降至 0%，純敘述從 87.6% 升至 91.4%。
 
 - **例句評分採 Sentence Mining 原則**（`src/nlp/sentenceScorer.ts`）：有意義的例句定義為「離開原書後仍能獨立理解，且能幫助推測目標單字」。評分標準：

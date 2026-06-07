@@ -7,8 +7,50 @@ const CEFR_MAP: Map<string, CefrLevel> = new Map(
   Object.entries(cefrData as Record<string, string>) as [string, CefrLevel][]
 );
 
+// 衍生詞回退：若 lemma 本身查無結果，嘗試剝除常見後綴找基底詞
+// 例：tightly→tight, blackness→black, movement→move, awaken→wake
+const SUFFIXES: Array<[RegExp, string]> = [
+  [/lly$/, 'l'],         // fully→full, dully→dull
+  [/ly$/, ''],           // quickly→quick, tightly→tight
+  [/ness$/, ''],         // blackness→black, darkness→dark
+  [/ment$/, 'e'],        // movement→move, arrangement→arrange (try with e)
+  [/ment$/, ''],         // movement→mov... fallback
+  [/ation$/, 'e'],       // creation→create, formation→forme（試）
+  [/ation$/, ''],        // relation→relat → probably won't match
+  [/tion$/, ''],         // action→act, reaction→react
+  [/tion$/, 'te'],       // addition→addite（fallback，通常沒用）
+  [/ing$/, 'e'],         // caring→care, making→make
+  [/ing$/, ''],          // knowing→know, burning→burn
+  [/en$/, 'e'],          // widen→wide, darken→dark（try keeping e）
+  [/en$/, ''],           // awaken→awak... fallback
+  [/ful$/, ''],          // powerful→power, hopeful→hope
+  [/less$/, ''],         // hopeless→hope, careless→care
+  [/ous$/, 'e'],         // nervous→nerve（試）
+  [/ous$/, ''],          // dangerous→danger, joyous→joy
+  [/ish$/, ''],          // childish→child, foolish→fool
+  [/ive$/, 'e'],         // creative→create, active→act（試）
+  [/ive$/, ''],          // active→act
+  [/er$/, 'e'],          // later→late, wider→wide（試）
+  [/er$/, ''],           // runner→run, fighter→fight
+  [/est$/, ''],          // greatest→great（最高級，lemmatizer 通常已處理）
+  [/ened$/, ''],         // happened... 很少用
+  [/ward$/, ''],         // outward→out, forward→for（通常無意義）
+];
+
 export function lookupCefrLevel(lemma: string): CefrLevel | undefined {
-  return CEFR_MAP.get(lemma.toLowerCase());
+  const word = lemma.toLowerCase();
+  const direct = CEFR_MAP.get(word);
+  if (direct) return direct;
+
+  // 衍生詞回退：剝除後綴後查詢
+  for (const [suffix, replacement] of SUFFIXES) {
+    if (!suffix.test(word)) continue;
+    const base = word.replace(suffix, replacement);
+    if (base.length < 3) continue;
+    const found = CEFR_MAP.get(base);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 const LEARNING_LEVELS: Set<CefrLevel> = new Set(['B1', 'B2', 'C1', 'C2']);

@@ -22,7 +22,8 @@ import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
-import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit } from './csv/beginnerExporter';
+import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile } from './csv/beginnerExporter';
+import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv } from './csv/beginnerDeeplTranslator';
 import * as fs from 'fs';
@@ -152,6 +153,16 @@ program
           if (!confirmed) { console.log(chalk.gray('已取消。')); process.exit(0); }
           console.log('');
 
+          // 嘗試讀取預建人名表（與 CSV 同目錄的 *-beginner-names.txt）
+          const csvDir = path.dirname(beginnerWordsCsvs[0]);
+          const namesFilesInDir = fs.readdirSync(csvDir).filter(f => f.endsWith('-beginner-names.txt'));
+          const prebuiltNamesForBatch = namesFilesInDir.length > 0
+            ? loadNamesFile(path.join(csvDir, namesFilesInDir[0]))
+            : undefined;
+          if (prebuiltNamesForBatch) {
+            console.log(chalk.gray(`  使用預建人名表（${prebuiltNamesForBatch.size} 個名詞）：${namesFilesInDir[0]}`));
+          }
+
           for (const csvPath of beginnerWordsCsvs) {
             process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
             const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
@@ -162,7 +173,7 @@ program
                 const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
                 process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
               }
-            }, { force });
+            }, { force, prebuiltNames: prebuiltNamesForBatch });
             process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
           }
 
@@ -332,6 +343,12 @@ program
         console.log(chalk.green(`✓ 翻譯清單：  ${wordsPath}`));
       }
 
+      // 匯出人名表（供使用者確認後翻譯時使用）
+      const cutoffTokens = cutoff !== undefined ? result.tokens.slice(0, cutoff) : result.tokens;
+      const namesFilePath = exportBeginnerNamesFile(cutoffTokens, deckName, options.output);
+      console.log(chalk.green(`✓ 人名表：      ${namesFilePath}`));
+      console.log(chalk.gray(`  （可在翻譯前確認或修改，翻譯時自動讀取以保護人名）`));
+
       // DeepL 自動翻譯
       if (options.deepl || options.deeplForce) {
         const deeplCfg = loadDeepLConfig();
@@ -354,6 +371,16 @@ program
         }
         console.log('');
 
+        // 嘗試讀取預建人名表（與 CSV 同目錄的 *-beginner-names.txt）
+        const outputDir = path.dirname(wordsCsvPaths[0]);
+        const namesFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('-beginner-names.txt'));
+        const prebuiltNames = namesFiles.length > 0
+          ? loadNamesFile(path.join(outputDir, namesFiles[0]))
+          : undefined;
+        if (prebuiltNames) {
+          console.log(chalk.gray(`  使用預建人名表（${prebuiltNames.size} 個名詞）：${namesFiles[0]}`));
+        }
+
         for (const csvPath of wordsCsvPaths) {
           process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
           const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
@@ -364,7 +391,7 @@ program
               const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
               process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
             }
-          }, { force });
+          }, { force, prebuiltNames });
           process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${res.translatedCount} 個，跳過 ${res.skippedCount} 個`)}\n`);
         }
 

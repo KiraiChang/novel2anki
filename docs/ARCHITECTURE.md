@@ -91,7 +91,8 @@ sentenceScorer.ts  ← 為每個詞從所有出現的句子中選最佳例句
 beginnerExporter.ts
   ├─ *-beginner-tokens.csv（12 欄，完整元資料 + ai_hint）
   ├─ *-beginner-words.csv（8 欄，含 global_frequency）  ← --beginner
-  └─ *-beginner-words-part-NN.csv（8 欄，分割版）       ← --beginner-split N
+  ├─ *-beginner-words-part-NN.csv（8 欄，分割版）       ← --beginner-split N
+  └─ *-beginner-names.txt（純文字人名表）               ← --beginner（供翻譯前確認）
 
   words CSV 欄位（8 欄）：
     lemma | pos | cefr_level | coverage_rank | global_frequency |
@@ -101,7 +102,9 @@ beginnerExporter.ts
     estimateBeginnerTranslate(csvPaths, { force? })
       → 統計未翻譯列數（force 時計全部）、字元量、費用預估
 
-    translateBeginnerWordsCsv(csvPath, config, onProgress, { force? })
+    translateBeginnerWordsCsv(csvPath, config, onProgress, { force?, prebuiltNames? })
+      prebuiltNames: 從 *-beginner-names.txt 讀入的 Set<string>（優先使用）
+      若未傳入則從本批句子動態偵測（backward compat fallback）
 
       Phase 1 — 字典查詢（MW 優先，Free Dictionary 為 fallback）
         for each lemma:
@@ -117,10 +120,19 @@ beginnerExporter.ts
           fallback → 同詞第一可用意義 → 或詞彙本身（兩個 API 皆無收錄時）
 
       Phase 2 — DeepL 批次翻譯（目標語言：zh-HANT 繁體中文）
-        交錯排列送入：[def1, sent1, def2, sent2, …, defN, sentN]
+        NER 人名保護（翻譯前）：
+          優先使用 prebuiltNames（讀自 *-beginner-names.txt，使用者可確認修改）
+          無 prebuiltNames 時動態建：
+            buildProperNounSet(sentences)
+              ↳ compromise .people() + #ProperNoun，以及 mid-sentence 大寫詞（從索引 1 起）
+              ↳ 跨句共享名詞集：「Pony」在任一句中段出現 → 同批所有句子（含句首）都保護
+          protectNames(sentence, nouns) → 替換為 __PERSON_0__、__PERSON_1__… + 還原表
+        交錯排列送入：[def1, protected_sent1, def2, protected_sent2, …]
         ↳ 定義與對應例句相鄰 → DeepL 翻譯 def_i 時以 sent_i 作語境，選出正確詞義
         每批次 50 筆（= 25 組詞對），batchTranslateChunked 循序累積
-        結果拆分：偶數索引 → defZh[]；奇數索引 → sentZh[]
+        NER 還原（翻譯後）：
+          restoreNames(translated, restoreMap) → __PERSON_N__ 換回原始人名
+        結果拆分：偶數索引 → defZh[]；奇數索引 → sentZh[]（已還原人名）
 
       Phase 3 — 寫回 CSV
         definition_zh     ← defZh[j]（每列皆覆寫）
@@ -175,10 +187,11 @@ beginnerExporter.ts
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
 | 例句評分 | `src/nlp/sentenceScorer.ts` | Sentence Mining 評分：為每個詞選出「離開原書後仍能獨立理解且能推測詞義」的例句；對話句（引號 / em dash）`-5`、代詞開頭（He/She/They…）`-2`、說話動詞 `-1`、純敘述 `+2`、長度 40–120 `+5` |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
-| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（8 欄，含 `global_frequency`）+ 分割版 words CSV |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（8 欄，含 `global_frequency`）+ 分割版 words CSV + `*-beginner-names.txt`（人名表） |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW Learner's API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾，onProgress 回報 source 標記）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
+| NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫）、`protectNames()` / `restoreNames()`（`__PERSON_N__` 佔位符）、`saveNamesFile()` / `loadNamesFile()`（純文字 I/O） |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW Learner's API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾，onProgress 回報 source 標記）→ ② NER 人名保護（優先使用 `prebuiltNames`）+ 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）+ 還原人名 → ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
 
 ## 核心型別
 

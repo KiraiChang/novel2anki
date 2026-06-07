@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { WordToken } from '../nlp/types';
+import { buildProperNounSet, saveNamesFile } from '../nlp/nameProtector';
 
 const HEADERS = [
   'token_id', 'lemma', 'original', 'pos', 'cefr_level', 'global_frequency',
@@ -99,6 +100,22 @@ export function exportBeginnerWordsToCsv(
   const outputPath = path.join(outputDir, filename);
   fs.mkdirSync(outputDir, { recursive: true });
   fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+  return outputPath;
+}
+
+// 從所有 token 的 bestSentence 提取人名，輸出到 *-beginner-names.txt
+// 使用者可在翻譯前確認與修改，--deepl 時自動讀取
+export function exportBeginnerNamesFile(
+  tokens: WordToken[],
+  deckName: string,
+  outputDir: string,
+): string {
+  const sentences = tokens.map(t => t.bestSentence).filter(Boolean);
+  const names = buildProperNounSet(sentences);
+  const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
+  const outputPath = path.join(outputDir, `${slug}-beginner-names.txt`);
+  fs.mkdirSync(outputDir, { recursive: true });
+  saveNamesFile(names, outputPath);
   return outputPath;
 }
 
