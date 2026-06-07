@@ -40,6 +40,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --beginner-target <N>   覆蓋率目標 0–100（預設：95）
   --beginner-min-freq <N> 詞彙最低出現次數（預設：2）
   --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
+  --beginner-split <N>    將翻譯 CSV 分割為每 N 個詞彙一個檔案（搭配 --beginner）
 ```
 
 ## 使用範例
@@ -233,7 +234,7 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 
 | 類型 | 正面 | 背面 |
 |------|------|------|
-| vocab | 單字 ＋ 例句 | 繁體中文定義 |
+| vocab | 單字 ＋ 英文例句 | 繁體中文定義（＋例句中文翻譯，若有填入） |
 | cloze | 挖空句（`___`） | 提示 ＋ 含答案原句（`【word】`）|
 | character | 人名 ＋ 首次出現原句 | 繁體中文描述 |
 | plot | 中文問題 | 答案 |
@@ -246,22 +247,62 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 
 ### 工作流程
 
+#### 手動翻譯
+
 ```bash
 # Step 1：掃描全書，輸出覆蓋率報告 + 兩個 CSV
 npx ts-node src/index.ts novel.epub --beginner
 
-# Step 2：填入 beginner-words.csv 的 definition_zh 欄位（手動或 DeepL）
+# Step 2：填入 *-beginner-words.csv 的 definition_zh 欄位
+#         （可選填 context_sentence_zh 補充例句中文翻譯）
 
 # Step 3：用填完的 words CSV 直接產生字卡
-npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel"
+npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
 ```
+
+#### DeepL 一次完成（小詞彙量）
+
+```bash
+# 擷取 → 顯示費用估算 → [Y/n] 確認 → DeepL 翻譯 → 提示產卡指令
+npx ts-node src/index.ts novel.epub --beginner --deepl
+
+# 翻譯完成後產生字卡
+npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
+```
+
+#### DeepL 分割翻譯（大詞彙量，推薦）
+
+```bash
+# Step 1：擷取並分割，每 100 個詞一個 CSV
+npx ts-node src/index.ts novel.epub --beginner --beginner-split 100
+# 輸出：
+#   output/novel-beginner-words-part-01.csv  （詞 1–100）
+#   output/novel-beginner-words-part-02.csv  （詞 101–200）
+#   output/novel-beginner-words-part-03.csv  ...
+
+# Step 2：逐一翻譯各分割 CSV
+#         每次翻譯前顯示費用估算並確認，翻譯結果直接寫回 CSV
+npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl
+npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --deepl
+# ...（重複至全部完成）
+
+# Step 3：所有分割 CSV 翻譯完成後，整目錄合併產出最終字卡
+npx ts-node src/index.ts output/ -d "Novel" --flash
+```
+
+> **提示**：Step 2 也可一次整目錄翻譯所有未翻譯的分割 CSV，適合確定費用後一口氣處理：
+> ```bash
+> npx ts-node src/index.ts output/ -d "Novel" --deepl --flash
+> ```
+> 系統會自動跳過已翻譯的列，並在完成後直接輸出 `.apkg` 與 `.html`。
 
 ### 輸出的兩個 CSV
 
-| 檔案 | 欄位 | 用途 |
-|------|------|------|
-| `*-beginner-tokens.csv` | 12 欄（含 token_id、位置、ai_hint） | 完整元資料存檔、追蹤回原文位置 |
-| `*-beginner-words.csv` | 6 欄 | 精簡翻譯用，適合送 DeepL 或人工翻譯 |
+| 檔案 | 欄位數 | 用途 |
+|------|:---:|------|
+| `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
+| `*-beginner-words.csv` | 7 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
+| `*-beginner-words-part-NN.csv` | 7 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
 
 **words CSV 欄位**：
 
@@ -271,7 +312,8 @@ npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel"
 | `pos` | 詞性 |
 | `cefr_level` | CEFR 等級（A2–C2 / UNKNOWN） |
 | `coverage_rank` | 學習優先順序（1 = 最高頻，最先學） |
-| `context_sentence` | 最佳例句，提供翻譯語境（字卡背面） |
+| `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
+| `context_sentence_zh` | 例句中文翻譯（留空，可選填，字卡背面輔助理解） |
 | `definition_zh` | 繁體中文定義（留空，待翻譯） |
 
 ### 覆蓋率報告範例

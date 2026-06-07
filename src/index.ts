@@ -23,6 +23,7 @@ import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
 import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit } from './csv/beginnerExporter';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles } from './csv/beginnerImporter';
+import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv } from './csv/beginnerDeeplTranslator';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -120,6 +121,37 @@ program
       // 目錄中可能同時含有 tokens.csv，過濾出 words 類型即可
       const beginnerWordsCsvs = csvPaths.filter(p => isBeginnerWordsCsv(p));
       if (beginnerWordsCsvs.length > 0) {
+        // DeepL 自動翻譯：翻譯後才讀入字卡
+        if (options.deepl) {
+          const deeplCfg = loadDeepLConfig();
+          const est = estimateBeginnerTranslate(beginnerWordsCsvs);
+          console.log('');
+          console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
+          if (est.untranslatedCount === 0) {
+            console.log(chalk.gray('所有詞彙已翻譯，跳過 DeepL 步驟。'));
+          } else {
+            const confirmed = await new Promise<boolean>(resolve => {
+              const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+              rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
+                rl.close();
+                resolve(ans.trim().toLowerCase() !== 'n');
+              });
+            });
+            if (!confirmed) { console.log(chalk.gray('已取消。')); process.exit(0); }
+            console.log('');
+
+            for (const csvPath of beginnerWordsCsvs) {
+              process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
+              const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
+                const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+                process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+              });
+              process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
+            }
+            console.log('');
+          }
+        }
+
         if (beginnerWordsCsvs.length > 1) {
           console.log(chalk.yellow(`正在合併 ${beginnerWordsCsvs.length} 個初學者翻譯 CSV...`));
           beginnerWordsCsvs.forEach((p, i) => console.log(chalk.gray(`  ${i + 1}. ${p}`)));
@@ -240,24 +272,66 @@ program
       console.log(chalk.gray(`  共 ${cutoff} 個詞彙（達 ${Math.round(targetCoverage * 100)}% 覆蓋率）`));
 
       const splitSize = options.beginnerSplit ? parseInt(options.beginnerSplit, 10) : undefined;
+      let wordsCsvPaths: string[];
       if (splitSize && splitSize > 0) {
-        const splitPaths = exportBeginnerWordsSplit(result.tokens, options.output, deckName, splitSize, cutoff);
-        console.log(chalk.green(`✓ 翻譯清單（分割）：${splitPaths.length} 個檔案`));
-        splitPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
-        console.log('');
-        console.log(chalk.cyan('下一步：'));
-        console.log(chalk.cyan(`  1. 在各分割 CSV 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
-        console.log(chalk.cyan(`  2. 翻譯完成後，執行以下指令合併並產生字卡：`));
-        console.log(chalk.white(`     npx ts-node src/index.ts ${options.output} -d "${deckName}"`));
-        console.log(chalk.gray(`     （指定含所有分割 CSV 的目錄，系統會自動偵測並合併）`));
+        wordsCsvPaths = exportBeginnerWordsSplit(result.tokens, options.output, deckName, splitSize, cutoff);
+        console.log(chalk.green(`✓ 翻譯清單（分割）：${wordsCsvPaths.length} 個檔案`));
+        wordsCsvPaths.forEach(p => console.log(chalk.gray(`  - ${p}`)));
       } else {
         const wordsPath = exportBeginnerWordsToCsv(result.tokens, options.output, deckName, cutoff);
+        wordsCsvPaths = [wordsPath];
         console.log(chalk.green(`✓ 翻譯清單：  ${wordsPath}`));
+      }
+
+      // DeepL 自動翻譯
+      if (options.deepl) {
+        const deeplCfg = loadDeepLConfig();
+        const est = estimateBeginnerTranslate(wordsCsvPaths);
+        console.log('');
+        console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
+
+        const confirmed = await new Promise<boolean>(resolve => {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
+            rl.close();
+            resolve(ans.trim().toLowerCase() !== 'n');
+          });
+        });
+        if (!confirmed) {
+          console.log(chalk.gray('已取消翻譯，CSV 已儲存可手動填入。'));
+          process.exit(0);
+        }
+        console.log('');
+
+        for (const csvPath of wordsCsvPaths) {
+          process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
+          const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase) => {
+            const label = phase === 'dict' ? '取得英文定義' : phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+            process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
+          });
+          process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${res.translatedCount} 個，跳過 ${res.skippedCount} 個`)}\n`);
+        }
+
+        console.log('');
+        console.log(chalk.cyan('翻譯完成，執行以下指令產生字卡：'));
+        if (wordsCsvPaths.length > 1) {
+          console.log(chalk.white(`  npx ts-node src/index.ts ${options.output} -d "${deckName}" --flash`));
+        } else {
+          console.log(chalk.white(`  npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}" --flash`));
+        }
+      } else {
         console.log('');
         console.log(chalk.cyan('下一步：'));
-        console.log(chalk.cyan(`  1. 在 ${path.basename(wordsPath)} 填入 definition_zh 欄位（或透過 DeepL 翻譯）`));
-        console.log(chalk.cyan(`  2. 執行以下指令產生字卡：`));
-        console.log(chalk.white(`     npx ts-node src/index.ts ${wordsPath} -d "${deckName}"`));
+        if (wordsCsvPaths.length > 1) {
+          console.log(chalk.cyan(`  1. 填入各分割 CSV 的 definition_zh（或加上 --deepl 自動翻譯）`));
+          console.log(chalk.cyan(`  2. 翻譯完成後，執行：`));
+          console.log(chalk.white(`     npx ts-node src/index.ts ${options.output} -d "${deckName}"`));
+          console.log(chalk.gray(`     （指定含所有分割 CSV 的目錄，系統會自動偵測並合併）`));
+        } else {
+          console.log(chalk.cyan(`  1. 填入 ${path.basename(wordsCsvPaths[0])} 的 definition_zh（或加上 --deepl 自動翻譯）`));
+          console.log(chalk.cyan(`  2. 執行：`));
+          console.log(chalk.white(`     npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}"`));
+        }
       }
       return;
     }

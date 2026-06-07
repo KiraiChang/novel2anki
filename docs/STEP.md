@@ -18,6 +18,25 @@
 
 ---
 
+### [STEP-007] 初學者模式擴充：分割輸出、例句中文、DeepL 自動翻譯
+**狀態**：已完成
+**目標**：強化初學者模式的翻譯工作流程。支援分割 words CSV、新增例句中文翻譯欄、整合 DeepL API 一鍵自動翻譯（含費用估算確認）。
+
+1. [x] `src/csv/beginnerExporter.ts`：新增 `exportBeginnerWordsSplit()`，按 `--beginner-split N` 分割輸出多個 `*-part-NN.csv`；words CSV 從 6 欄擴充為 7 欄（加入 `context_sentence_zh`）
+2. [x] `src/csv/beginnerImporter.ts`：新增 `importBeginnerWordsFromFiles()`，支援多個分割 CSV 合併讀入並按 `coverage_rank` 排序去重
+3. [x] `src/cards/types.ts`：`VocabCard` 加入 `exampleZh?: string`（例句中文翻譯）
+4. [x] `src/html/exporter.ts`：vocab 卡片顯示 `exampleZh`（靜態 HTML + 互動翻牌背面 + flash 背面）；新增 `.example-zh` CSS 樣式
+5. [x] 新建 `src/csv/beginnerDeeplTranslator.ts`：`estimateBeginnerTranslate()`（字元估算 + 費用預估）、`formatBeginnerTranslateEstimate()`（格式化報表）、`translateBeginnerWordsCsv()`（三階段：字典 API → DeepL batchTranslate → 覆寫 CSV，每批 50 筆）
+6. [x] `src/index.ts`：新增 `--beginner-split` 選項；CSV 輸入分支改用 `filter()` 取代 `every()`，使目錄中混有 tokens.csv 時仍能正確偵測 words CSV；新增 DeepL 翻譯分支（兩個路徑：`--beginner --deepl` 擷取後直翻；words CSV + `--deepl` 補譯後輸出卡片）
+
+**備注**：
+- DeepL 批次翻譯每次最多 50 筆（`DEEPL_BATCH_SIZE = 50`），超過時自動分批
+- 費用計算：句子字元（實際值）+ 定義字元（每詞平均估 100）= 預估總量；超出 500,000 字元免費額度才顯示金額
+- words CSV 分割時，檔名補零位數自動依總檔數決定（3 個檔 → `01–03`，10 個以上 → `01–10`）
+- `context_sentence_zh` 填入後出現在 flash 卡片背面（定義下方換行顯示），協助初學者對照理解
+
+---
+
 ### [STEP-006] 初學者覆蓋率單字擷取模式（`--beginner`）
 **狀態**：已完成
 **目標**：為中文母語英文初學者設計「讀完字卡就能閱讀這本小說」的單字擷取方法。以全書詞頻覆蓋率為核心，輸出可獨立翻譯的精簡 CSV，填完翻譯後直接生成 Anki 字卡，不依賴 AI API。

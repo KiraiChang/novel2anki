@@ -90,7 +90,12 @@ sentenceScorer.ts  ← 為每個詞從所有出現的句子中選最佳例句
   │
 beginnerExporter.ts
   ├─ *-beginner-tokens.csv（12 欄，完整元資料 + ai_hint）
-  └─ *-beginner-words.csv（6 欄，精簡翻譯用）
+  ├─ *-beginner-words.csv（7 欄，精簡翻譯用）          ← --beginner
+  └─ *-beginner-words-part-NN.csv（7 欄，分割版）      ← --beginner-split N
+
+  [選用] beginnerDeeplTranslator.ts
+    estimateBeginnerTranslate() → 顯示字元估算 + 費用
+    translateBeginnerWordsCsv()  → 取字典定義 → batchTranslate → 覆寫 CSV
 ```
 
 ## 模組職責
@@ -126,15 +131,17 @@ beginnerExporter.ts
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
 | 例句評分 | `src/nlp/sentenceScorer.ts` | 為每個詞從所有出現句子中選最適合學習的例句 |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
-| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（翻譯用） |
-| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式、匯入 tokens/words → VocabCard[] |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（7 欄翻譯用）+ 分割版 words CSV |
+| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[] |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 估算字元費用、三階段批次翻譯（字典 API → DeepL → 覆寫 CSV） |
 
 ## 核心型別
 
 ```typescript
 // 基礎卡片
 interface Chunk          { index: number; text: string; chapter?: string }
-interface VocabCard      { type: 'vocab';     word: string; definition_zh: string; exampleFromText: string }
+interface VocabCard      { type: 'vocab'; word: string; definition_zh: string;
+                           exampleFromText: string; exampleZh?: string }  // exampleZh：初學者模式例句中文翻譯
 interface ClozeCard      { type: 'cloze';     text: string; hint_zh: string }
 interface CharacterCard  { type: 'character'; name: string; description_zh: string; firstMention: string }
 interface PlotCard       { type: 'plot';      question_zh: string; answer_zh: string }
@@ -152,6 +159,7 @@ interface GlobalFreqEntry {
   cefrLevel: CefrLevel | 'UNKNOWN';
   globalCount: number;
   occurrences: WordOccurrence[];
+  midSentenceCapitalCount: number;  // 在句中（tokenIndex > 0）出現大寫的次數，用於專有名詞偵測
 }
 interface WordToken {
   id: string;              // 最佳例句的 occurrence id
