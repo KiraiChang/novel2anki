@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { DeepLConfig, batchTranslate } from '../cards/deeplTranslator';
 
-const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/collegiate/json';
+const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 const DEEPL_FREE_LIMIT = 500_000;
 const DEEPL_PRO_PRICE_PER_MILLION = 25;
@@ -90,7 +90,10 @@ async function fetchDefinitionFromMW(
     `${MW_API}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
     { signal: AbortSignal.timeout(5000) },
   );
-  if (!res.ok) return null;
+  if (!res.ok) {
+    process.stderr.write(`[MW] HTTP ${res.status} "${word}" — key 可能對應錯誤的 MW 字典類型\n`);
+    return null;
+  }
   const raw = await res.json() as (MWEntry | string)[];
 
   // MW 找不到詞時回傳建議字串陣列，過濾掉
