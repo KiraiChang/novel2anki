@@ -76,11 +76,13 @@ export function importBeginnerWords(csvPath: string): VocabCard[] {
     const definition = get('definition_zh').trim();
     if (!definition) continue;
 
+    const exampleZh = get('context_sentence_zh').trim();
     cards.push({
       type: 'vocab',
       word: get('lemma'),
       definition_zh: definition,
       exampleFromText: get('context_sentence'),
+      ...(exampleZh ? { exampleZh } : {}),
     });
   }
 
@@ -142,12 +144,14 @@ export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
       if (!definition || !lemma || seen.has(lemma)) continue;
       seen.add(lemma);
 
+      const exampleZh = get('context_sentence_zh').trim();
       ranked.push({
         card: {
           type: 'vocab' as const,
           word: lemma,
           definition_zh: definition,
           exampleFromText: get('context_sentence'),
+          ...(exampleZh ? { exampleZh } : {}),
         },
         coverageRank: parseInt(get('coverage_rank'), 10) || 0,
       });

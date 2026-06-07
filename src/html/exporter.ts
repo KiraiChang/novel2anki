@@ -35,6 +35,7 @@ function vocabSection(cards: VocabCard[], interactive = false): string {
       <div class="word">${escapeHtml(c.word)}</div>
       <div class="definition">${escapeHtml(c.definition_zh)}</div>
       <div class="example">${escapeHtml(c.exampleFromText)}</div>
+      ${c.exampleZh ? `<div class="example-zh">${escapeHtml(c.exampleZh)}</div>` : ''}
     </div>`;
     return `
     <div class="card vocab flip-card" tabindex="0" onclick="this.classList.toggle('revealed')" title="點擊顯示／隱藏中文">
@@ -45,6 +46,7 @@ function vocabSection(cards: VocabCard[], interactive = false): string {
       </div>
       <div class="card-back">
         <div class="definition">${escapeHtml(c.definition_zh) || '<span class="empty">（尚未填入）</span>'}</div>
+        ${c.exampleZh ? `<div class="example-zh">${escapeHtml(c.exampleZh)}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -175,6 +177,10 @@ const SHARED_CSS = `
   .example {
     color: #666; font-style: italic;
     border-left: 3px solid #aed6f1; padding-left: 10px; font-size: 14px;
+  }
+  .example-zh {
+    color: #888; font-size: 13px;
+    border-left: 3px solid #aed6f1; padding-left: 10px; margin-top: 4px;
   }
   /* ── cloze ── */
   .cloze { border-left-color: #2ecc71; }
@@ -315,7 +321,7 @@ function buildFlashDeck(cards: GeneratedCards): Record<string, FlashCard[]> {
     vocab: cards.vocab.map(c => ({
       primary: c.word,
       secondary: c.exampleFromText,
-      answer: c.definition_zh || '（尚未填入定義）',
+      answer: (c.definition_zh || '（尚未填入定義）') + (c.exampleZh ? '\n\n' + c.exampleZh : ''),
     })),
     cloze: cards.cloze.map(c => ({
       primary: c.text.replace(/\{\{c\d+::([^}]+)\}\}/g, '___'),

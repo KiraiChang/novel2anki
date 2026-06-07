@@ -30,7 +30,7 @@ function buildAiHint(token: WordToken, deckName: string): string {
 }
 
 const WORDS_HEADERS = [
-  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'context_sentence', 'definition_zh',
+  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'context_sentence', 'context_sentence_zh', 'definition_zh',
 ];
 
 export function exportBeginnerWordsSplit(
@@ -61,6 +61,7 @@ export function exportBeginnerWordsSplit(
         token.cefrLevel,
         String(token.coverageRank),
         token.bestSentence,
+        '',               // context_sentence_zh：留空供翻譯填入
         token.definition_zh,
       ]));
     }
@@ -86,6 +87,7 @@ export function exportBeginnerWordsToCsv(
       token.cefrLevel,
       String(token.coverageRank),
       token.bestSentence,
+      '',               // context_sentence_zh：留空供翻譯填入
       token.definition_zh,
     ]));
   }
