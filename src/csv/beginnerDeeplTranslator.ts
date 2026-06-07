@@ -63,17 +63,52 @@ interface DictEntry {
   meanings: Array<{ partOfSpeech: string; definitions: Array<{ definition: string }> }>;
 }
 
-async function fetchEnglishDefinition(word: string): Promise<string | null> {
+// CSV POS → Free Dictionary API partOfSpeech（小寫）
+function normalizePOS(pos: string): string | null {
+  const map: Record<string, string> = {
+    noun: 'noun', verb: 'verb', adjective: 'adjective', adverb: 'adverb',
+    pronoun: 'pronoun', preposition: 'preposition', conjunction: 'conjunction',
+    interjection: 'interjection', gerund: 'verb', participle: 'verb',
+  };
+  return map[pos.toLowerCase()] ?? null;
+}
+
+async function fetchEnglishDefinition(word: string, pos?: string): Promise<string | null> {
   try {
     const res = await fetch(`${DICT_API}/${encodeURIComponent(word)}`, {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;
     const data = await res.json() as DictEntry[];
-    const meaning = data[0]?.meanings[0];
-    if (!meaning) return null;
-    const def = meaning.definitions[0]?.definition ?? null;
-    return def ? `(${meaning.partOfSpeech}) ${def}` : null;
+
+    const targetPOS = pos ? normalizePOS(pos) : null;
+
+    // 判斷定義是否適合翻譯（排除交叉參照短句與含括弧 POS 的定義）
+    const isUsable = (def: string) =>
+      def.length >= 10 &&
+      !/^(See|Compare|Alternative|Synonym|Archaic)/i.test(def.trim()) &&
+      !/\((verb|noun|adjective|adverb|pronoun)\)/i.test(def);
+
+    // 優先找符合 POS 且可用的定義
+    if (targetPOS) {
+      for (const entry of data) {
+        for (const meaning of entry.meanings) {
+          if (meaning.partOfSpeech === targetPOS) {
+            const def = meaning.definitions.find(d => isUsable(d.definition))?.definition ?? null;
+            if (def) return `(${meaning.partOfSpeech}) ${def}`;
+          }
+        }
+      }
+    }
+
+    // 找不到符合詞性則 fallback 到第一個可用意義
+    for (const entry of data) {
+      for (const meaning of entry.meanings) {
+        const def = meaning.definitions.find(d => isUsable(d.definition))?.definition ?? null;
+        if (def) return `(${meaning.partOfSpeech}) ${def}`;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -191,12 +226,13 @@ export async function translateBeginnerWordsCsv(
     return { translatedCount: 0, skippedCount, outputPath: csvPath };
   }
 
-  // Phase 1：抓英文字典定義（並行，失敗則用詞彙本身）
+  // Phase 1：抓英文字典定義（失敗則用詞彙本身）
   const lemmas = needTranslation.map(({ cols }) => get(cols, 'lemma'));
+  const posList = needTranslation.map(({ cols }) => get(cols, 'pos'));
   const englishDefs: string[] = [];
   for (let i = 0; i < lemmas.length; i++) {
     onProgress?.(i + 1, lemmas.length, 'dict');
-    const def = await fetchEnglishDefinition(lemmas[i]);
+    const def = await fetchEnglishDefinition(lemmas[i], posList[i]);
     englishDefs.push(def ?? lemmas[i]);
   }
 
