@@ -26,6 +26,11 @@
 - 克漏字目前只支援單一 `{{c1::}}`，不支援多重填空。
 - 無卡片去重機制，同一單字若在多章節出現會重複建卡。
 
+## 初學者模式（`--beginner` + `--deepl`）
+
+- **字典 API 定義品質不足**（`src/csv/beginnerDeeplTranslator.ts`）：`dictionaryapi.dev` 以 Wiktionary 為資料來源，部分詞彙的第一筆定義為冷僻義或古義（如 `above` adjective → "Of heaven; heavenly"），即使套用 POS 優先比對仍可能取到非預期結果。Fantasy 自創詞（如 `powrie`、`powry`）完全無法查詢，fallback 為詞本身。**改善路徑**：見 `TODOS.md`「升級字典 API」。
+- **DeepL 批次上下文影響翻譯**（`src/csv/beginnerDeeplTranslator.ts`）：DeepL array 模式會以同批次文字互為上下文，雖已改為交錯排列（`[def1, sent1, def2, sent2, …]`）降低跨詞污染，但同批次內 25 組詞對仍可能相互干擾，無法完全消除。
+
 ## Mock 模式
 
 Mock 模式的已知限制獨立維護於 [mock/ISSUES.md](mock/ISSUES.md)。

@@ -93,9 +93,31 @@ beginnerExporter.ts
   ├─ *-beginner-words.csv（7 欄，精簡翻譯用）          ← --beginner
   └─ *-beginner-words-part-NN.csv（7 欄，分割版）      ← --beginner-split N
 
-  [選用] beginnerDeeplTranslator.ts
-    estimateBeginnerTranslate() → 顯示字元估算 + 費用
-    translateBeginnerWordsCsv()  → 取字典定義 → batchTranslate → 覆寫 CSV
+  [選用] beginnerDeeplTranslator.ts（--deepl / --deepl-force）
+    estimateBeginnerTranslate(csvPaths, { force? })
+      → 統計未翻譯列數（force 時計全部）、字元量、費用預估
+
+    translateBeginnerWordsCsv(csvPath, config, onProgress, { force? })
+
+      Phase 1 — 字典查詢（Free Dictionary API）
+        for each lemma:
+          GET dictionaryapi.dev/api/v2/entries/en/{lemma}
+          ├─ normalizePOS(pos)  CSV 詞性 → API partOfSpeech（小寫）
+          ├─ 優先找符合 POS 的意義
+          ├─ isUsable(def)  排除短句 / See… / Compare… / 含括弧 POS 的交叉參照
+          └─ fallback → 同詞第一可用意義 → 或詞彙本身（字典無收錄時）
+
+      Phase 2 — DeepL 批次翻譯（目標語言：zh-HANT 繁體中文）
+        交錯排列送入：[def1, sent1, def2, sent2, …, defN, sentN]
+        ↳ 定義與對應例句相鄰 → DeepL 翻譯 def_i 時以 sent_i 作語境，選出正確詞義
+        每批次 50 筆（= 25 組詞對），batchTranslateChunked 循序累積
+        結果拆分：偶數索引 → defZh[]；奇數索引 → sentZh[]
+
+      Phase 3 — 寫回 CSV
+        definition_zh     ← defZh[j]（每列皆覆寫）
+        context_sentence_zh ← sentZh[j]（已有內容跳過；force 模式強制覆寫）
+
+    --deepl-force：needTranslation = 全部列（不過濾已翻譯）
 ```
 
 ## 模組職責
@@ -133,7 +155,7 @@ beginnerExporter.ts
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
 | 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（完整）+ words CSV（7 欄翻譯用）+ 分割版 words CSV |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[] |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 估算字元費用、三階段批次翻譯（字典 API → DeepL → 覆寫 CSV）；支援 `force` 模式全列重譯 |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① Free Dict API 取英文定義（POS 優先比對 + `isUsable` 過濾交叉參照）→ ② 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）→ ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
 
 ## 核心型別
 
@@ -192,5 +214,6 @@ interface WordToken {
 | `commander` | CLI 參數解析 |
 | `chalk` | 終端彩色輸出 |
 | `dotenv` | 載入 `.env` 環境變數 |
-| `fetch()` | Node 18+ 內建，`offlineGenerator.ts` 呼叫 Ollama REST API（不引入新套件） |
+| `deepl-node` | DeepL 官方 SDK，`--deepl` / `--deepl-force` 模式批次翻譯（目標語言 `zh-HANT`） |
+| `fetch()` | Node 18+ 內建，Ollama REST API 呼叫與 Free Dictionary API 查詢（不引入新套件） |
 | `compromise` | 純 JS NLP，tokenize / POS / lemma（verbs→infinitive，nouns→singular） |

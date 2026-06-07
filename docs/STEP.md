@@ -28,7 +28,8 @@
 
 **備注**：
 - `'zh'` 在 deepl-node 的 `TargetLanguageCode` 型別屬於 `CommonLanguageCode`，為簡體中文；繁體正確代碼為 `'zh-HANT'`（在 `TargetLanguageCode` 特定擴充集中）
-- DeepL 批次翻譯（array 模式）會對同 batch 內的文字進行上下文關聯推斷，導致前後相鄰定義可能互相污染（例如 `fear` 被錯誤翻為「男人」）；force 重新翻譯可修正此類問題，但批次污染屬 DeepL API 行為限制，無法從程式面完全消除
+- DeepL 批次翻譯（array 模式）會對同 batch 內的文字進行上下文關聯推斷，導致前後相鄰定義可能互相污染（例如 `fear` 被錯誤翻為「男人」）；透過將 batch 改為交錯排列（`[def1, sent1, def2, sent2, …]`）可將污染轉為助益：DeepL 翻譯 def_i 時能直接讀到 sent_i 的語境，選出正確詞義
+- `fetchEnglishDefinition` 新增 `pos` 參數與 `normalizePOS` 對應表，優先尋找符合 CSV 詞性的字典定義；並以 `isUsable()` 過濾交叉參照短句（開頭為 See/Compare/Alternative/Synonym/Archaic，或含括弧 POS 的定義）
 
 ---
 

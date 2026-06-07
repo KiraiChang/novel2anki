@@ -236,9 +236,12 @@ export async function translateBeginnerWordsCsv(
     englishDefs.push(def ?? lemmas[i]);
   }
 
-  // Phase 2：DeepL 批次翻譯（定義 + 例句合在一個請求序列）
+  // Phase 2：DeepL 批次翻譯
+  // 交錯排列 [def1, sent1, def2, sent2, …]，讓定義與對應例句相鄰
+  // DeepL 批次模式會以同批次的文字互為上下文；相鄰排列讓 DeepL
+  // 在翻譯 def_i 時能參考 sent_i 的語境，選出正確詞義。
   const sentences = needTranslation.map(({ cols }) => get(cols, 'context_sentence'));
-  const allTexts = [...englishDefs, ...sentences];
+  const allTexts = englishDefs.flatMap((def, i) => [def, sentences[i]]);
   onProgress?.(0, allTexts.length, 'deepl');
   const allTranslated = await batchTranslateChunked(allTexts, config, (done, total) => {
     onProgress?.(done, total, 'deepl');
@@ -250,8 +253,9 @@ export async function translateBeginnerWordsCsv(
     );
   }
 
-  const defZh = allTranslated.slice(0, englishDefs.length);
-  const sentZh = allTranslated.slice(englishDefs.length);
+  // 偶數索引 = 定義，奇數索引 = 例句
+  const defZh = allTranslated.filter((_, i) => i % 2 === 0);
+  const sentZh = allTranslated.filter((_, i) => i % 2 === 1);
 
   // Phase 3：填回資料列
   onProgress?.(0, 1, 'write');
