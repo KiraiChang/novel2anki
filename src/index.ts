@@ -25,7 +25,7 @@ import { formatCoverageReport } from './nlp/coverageReport';
 import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile } from './csv/beginnerExporter';
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
-import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv } from './csv/beginnerDeeplTranslator';
+import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch } from './csv/beginnerDeeplTranslator';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -59,6 +59,7 @@ program
   .option('--beginner-min-freq <次數>', '詞彙最低出現次數門檻（預設：2）', '2')
   .option('--beginner-include-a1', '包含 A1 基礎詞彙（預設：排除）')
   .option('--beginner-split <數量>', '將翻譯 CSV 分割為每 N 個詞彙一個檔案')
+  .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -78,8 +79,9 @@ program
     beginnerMinFreq?: string;
     beginnerIncludeA1?: boolean;
     beginnerSplit?: string;
+    mw?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -104,6 +106,8 @@ program
     console.log(chalk.cyan(`\n📖 PDF 小說 → Anki 字卡產生器`));
     if (options.mock)   console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
     if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
+    if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
+    if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green('   [MW 預查 + DeepL 翻譯模式]'));
     if (options.deepl && !isCompare) console.log(chalk.blue('   [DeepL 翻譯模式]'));
     if (isCompare) console.log(chalk.blue(`   [DeepL 比對模式：DeepL vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
@@ -125,6 +129,34 @@ program
       // 目錄中可能同時含有 tokens.csv，過濾出 words 類型即可
       const beginnerWordsCsvs = csvPaths.filter(p => isBeginnerWordsCsv(p));
       if (beginnerWordsCsvs.length > 0) {
+        // MW 預查：預先擷取英文定義並寫入 definition_en 欄（可單獨或搭配 --deepl）
+        if (options.mw) {
+          const { unfetchedCount } = estimateMWFetch(beginnerWordsCsvs);
+          console.log('');
+          console.log(chalk.cyan(`MW 預查：共 ${unfetchedCount} 個詞彙待預查`));
+          if (unfetchedCount === 0) {
+            console.log(chalk.yellow('  所有詞彙已預查完畢（definition_en 欄位已填）。'));
+          } else {
+            for (const csvPath of beginnerWordsCsvs) {
+              process.stdout.write(chalk.yellow(`正在預查 ${path.basename(csvPath)}...\n`));
+              const mwResult = await fetchBeginnerWordsMW(csvPath, (cur, total, meta) => {
+                const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
+                process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
+              });
+              process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個`)}\n`);
+            }
+          }
+          console.log('');
+          if (!options.deepl && !options.deeplForce) {
+            console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
+            console.log(chalk.cyan('下一步：執行以下指令進行 DeepL 翻譯：'));
+            const outputDir = isDirectory ? pdfFile : path.dirname(beginnerWordsCsvs[0]);
+            console.log(chalk.white(`  npx ts-node src/index.ts ${outputDir} -d "${deckName}" --deepl`));
+            return;
+          }
+          // --mw --deepl：繼續執行下方 DeepL 流程
+        }
+
         // DeepL 自動翻譯：翻譯後覆寫 CSV 並退出，不產生 APKG/HTML
         // 使用者等所有分割檔翻譯完畢後再整目錄合併產出字卡
         if (options.deepl || options.deeplForce) {
@@ -167,7 +199,7 @@ program
             process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
             const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
               if (phase === 'dict') {
-                const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
+                const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
                 process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
               } else {
                 const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
@@ -349,6 +381,33 @@ program
       console.log(chalk.green(`✓ 人名表：      ${namesFilePath}`));
       console.log(chalk.gray(`  （可在翻譯前確認或修改，翻譯時自動讀取以保護人名）`));
 
+      // MW 預查（可單獨或搭配 --deepl）
+      if (options.mw) {
+        console.log('');
+        const { unfetchedCount } = estimateMWFetch(wordsCsvPaths);
+        console.log(chalk.cyan(`MW 預查：共 ${unfetchedCount} 個詞彙待預查`));
+        for (const csvPath of wordsCsvPaths) {
+          process.stdout.write(chalk.yellow(`正在預查 ${path.basename(csvPath)}...\n`));
+          const mwResult = await fetchBeginnerWordsMW(csvPath, (cur, total, meta) => {
+            const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
+            process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
+          });
+          process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個`)}\n`);
+        }
+        console.log('');
+        if (!options.deepl && !options.deeplForce) {
+          console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
+          console.log(chalk.cyan('下一步：執行以下指令進行 DeepL 翻譯：'));
+          if (wordsCsvPaths.length > 1) {
+            console.log(chalk.white(`  npx ts-node src/index.ts ${options.output} -d "${deckName}" --deepl`));
+          } else {
+            console.log(chalk.white(`  npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}" --deepl`));
+          }
+          return;
+        }
+        // --mw --deepl：繼續執行下方 DeepL 流程
+      }
+
       // DeepL 自動翻譯
       if (options.deepl || options.deeplForce) {
         const deeplCfg = loadDeepLConfig();
@@ -385,7 +444,7 @@ program
           process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
           const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
             if (phase === 'dict') {
-              const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
+              const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
               process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
             } else {
               const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';

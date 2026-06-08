@@ -158,7 +158,7 @@ async function fetchDefinitionFromFreeDict(
 
 // ── 對外介面：MW 優先，失敗則 fallback Free Dictionary ─────────────────────────
 
-export type DictSource = 'MW' | 'free' | 'fallback';
+export type DictSource = 'MW' | 'free' | 'fallback' | 'cached';
 
 async function fetchEnglishDefinition(
   word: string,
@@ -200,6 +200,86 @@ async function batchTranslateChunked(
 }
 
 // ── 公開 API ─────────────────────────────────────────────────────────────────
+
+export function estimateMWFetch(
+  csvPaths: string[],
+  options?: { force?: boolean },
+): { unfetchedCount: number } {
+  let unfetchedCount = 0;
+  for (const csvPath of csvPaths) {
+    let content: string;
+    try { content = fs.readFileSync(csvPath, 'utf-8'); } catch { continue; }
+    const lines = splitLines(content);
+    if (lines.length < 2) continue;
+    const headers = parseRow(lines[0]);
+    const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseRow(lines[i]);
+      const defEn = cols[idx['definition_en']] ?? '';
+      if (options?.force || !defEn.trim()) unfetchedCount++;
+    }
+  }
+  return { unfetchedCount };
+}
+
+export interface MWFetchResult {
+  fetchedCount: number;
+  skippedCount: number;
+  outputPath: string;
+}
+
+export async function fetchBeginnerWordsMW(
+  csvPath: string,
+  onProgress?: (current: number, total: number, meta?: { source?: DictSource; word?: string }) => void,
+  options?: { force?: boolean },
+): Promise<MWFetchResult> {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) return { fetchedCount: 0, skippedCount: 0, outputPath: csvPath };
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+
+  // 若 CSV 沒有 definition_en 欄（舊格式），插入於 context_sentence 之前
+  if (idx['definition_en'] === undefined) {
+    const insertAt = idx['context_sentence'] ?? headers.length;
+    headers.splice(insertAt, 0, 'definition_en');
+    for (const key of Object.keys(idx)) {
+      if (idx[key] >= insertAt) idx[key]++;
+    }
+    idx['definition_en'] = insertAt;
+    for (const row of rows) row.splice(insertAt, 0, '');
+  }
+
+  const defEnColIdx = idx['definition_en'];
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  const needFetch = rows
+    .map((cols, i) => ({ i, cols }))
+    .filter(({ cols }) => options?.force || !get(cols, 'definition_en').trim());
+
+  const skippedCount = rows.length - needFetch.length;
+
+  for (let j = 0; j < needFetch.length; j++) {
+    const { i, cols } = needFetch[j];
+    const lemma = get(cols, 'lemma');
+    const pos   = get(cols, 'pos');
+    const { def, source } = await fetchEnglishDefinition(lemma, pos);
+    while (rows[i].length <= defEnColIdx) rows[i].push('');
+    rows[i][defEnColIdx] = def;
+    onProgress?.(j + 1, needFetch.length, { source, word: lemma });
+  }
+
+  const headerLine = headers.map(escapeField).join(',');
+  const dataLines  = rows.map(cols => {
+    while (cols.length < headers.length) cols.push('');
+    return cols.map(escapeField).join(',');
+  });
+  fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+
+  return { fetchedCount: needFetch.length, skippedCount, outputPath: csvPath };
+}
 
 export interface BeginnerTranslateEstimate {
   untranslatedCount: number;
@@ -299,14 +379,20 @@ export async function translateBeginnerWordsCsv(
     return { translatedCount: 0, skippedCount, outputPath: csvPath };
   }
 
-  // Phase 1：抓英文字典定義（失敗則用詞彙本身）
+  // Phase 1：取英文字典定義（若 CSV 已有 definition_en 則直接使用，跳過 MW 呼叫）
   const lemmas = needTranslation.map(({ cols }) => get(cols, 'lemma'));
   const posList = needTranslation.map(({ cols }) => get(cols, 'pos'));
   const englishDefs: string[] = [];
   for (let i = 0; i < lemmas.length; i++) {
-    const { def, source } = await fetchEnglishDefinition(lemmas[i], posList[i]);
-    englishDefs.push(def);
-    onProgress?.(i + 1, lemmas.length, 'dict', { source, word: lemmas[i] });
+    const cached = get(needTranslation[i].cols, 'definition_en');
+    if (cached?.trim()) {
+      englishDefs.push(cached.trim());
+      onProgress?.(i + 1, lemmas.length, 'dict', { source: 'cached', word: lemmas[i] });
+    } else {
+      const { def, source } = await fetchEnglishDefinition(lemmas[i], posList[i]);
+      englishDefs.push(def);
+      onProgress?.(i + 1, lemmas.length, 'dict', { source, word: lemmas[i] });
+    }
   }
 
   // Phase 2：DeepL 批次翻譯

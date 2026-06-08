@@ -31,7 +31,7 @@ function buildAiHint(token: WordToken, deckName: string): string {
 }
 
 const WORDS_HEADERS = [
-  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency', 'context_sentence', 'context_sentence_zh', 'definition_zh',
+  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency', 'definition_en', 'context_sentence', 'context_sentence_zh', 'definition_zh',
 ];
 
 export function exportBeginnerWordsSplit(
@@ -62,6 +62,7 @@ export function exportBeginnerWordsSplit(
         token.cefrLevel,
         String(token.coverageRank),
         String(token.globalFrequency),
+        '',               // definition_en：留空供 MW 預查填入
         token.bestSentence,
         '',               // context_sentence_zh：留空供翻譯填入
         token.definition_zh,
@@ -89,6 +90,7 @@ export function exportBeginnerWordsToCsv(
       token.cefrLevel,
       String(token.coverageRank),
       String(token.globalFrequency),
+      '',               // definition_en：留空供 MW 預查填入
       token.bestSentence,
       '',               // context_sentence_zh：留空供翻譯填入
       token.definition_zh,
