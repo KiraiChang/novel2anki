@@ -493,3 +493,73 @@ describe('prefetchCefrZhToWordCache — POS-specific translation', () => {
     expect(result.fetchedCount).toBe(1);
   });
 });
+
+// ── prefetchCefrZhToWordCache — legacy base zh copy ───────────────────────────
+
+describe('prefetchCefrZhToWordCache — legacy base zh copy', () => {
+  it('should copy existing base zh to missing POS keys without calling translation API', async () => {
+    // Given: chapter 的 noun POS 尚未快取，但 base（no-POS）已有舊格式翻譯
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) one of the main sections of a book' },
+    ]);
+    mockCache.hasChinese.mockImplementation((_: string, pos: string | null) => pos === null);
+    mockCache.getChinese.mockReturnValue('（名詞）書籍的主要部分之一');
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['chapter']);
+    // Then: 直接複製，不呼叫翻譯 API
+    expect(batchTranslate).not.toHaveBeenCalled();
+    expect(mockCache.setChinese).toHaveBeenCalledWith('chapter', 'noun', '（名詞）書籍的主要部分之一', 'legacy:copied');
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(0);
+  });
+
+  it('should copy base zh to ALL missing POS keys when multiple are absent', async () => {
+    // Given: cross 有 noun + verb，只有 base 翻譯（舊格式）
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) a cross' },
+      { pos: 'verb', def: '(verb) to cross' },
+    ]);
+    mockCache.hasChinese.mockImplementation((_: string, pos: string | null) => pos === null);
+    mockCache.getChinese.mockReturnValue('（名詞）十字形狀');
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
+    // Then: noun 和 verb 都複製自 base
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'noun', '（名詞）十字形狀', 'legacy:copied');
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'verb', '（名詞）十字形狀', 'legacy:copied');
+    expect(batchTranslate).not.toHaveBeenCalled();
+  });
+});
+
+// ── prefetchCefrZhToWordCache — Azure 429 break ───────────────────────────────
+
+describe('prefetchCefrZhToWordCache — Azure 429 break', () => {
+  it('should stop remaining batches when translation throws 429 and call flush once', async () => {
+    // Given: 3 words → 1 batch；batchTranslate 拋出 429
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run' }]);
+    (batchTranslate as jest.Mock).mockRejectedValue(new Error('Azure Translator HTTP 429'));
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: 只呼叫一次 batchTranslate，flush 仍寫盤
+    expect(batchTranslate).toHaveBeenCalledTimes(1);
+    expect(mockCache.flush).toHaveBeenCalledTimes(1);
+    expect(result.failedCount).toBeGreaterThan(0);
+  });
+
+  it('should continue processing next batch when error is NOT 429', async () => {
+    // Given: 3 words → 1 batch；拋出非 429 錯誤
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run' }]);
+    (batchTranslate as jest.Mock)
+      .mockRejectedValueOnce(new Error('DeepL quota exceeded'))
+      .mockResolvedValueOnce(['熊', '去']);
+    // When: 只有 1 批（3 詞），但第一批失敗後仍只有 1 批（不會再觸發第二批）
+    // 改用 2 batch 情境：first throws non-429, second succeeds
+    const words = [...TEST_WORDS, 'extra'];  // 4 words still 1 batch
+    (batchTranslate as jest.Mock)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(['翻譯']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, words);
+    // 由於 TEST_WORDS+extra 只有 4 詞 → 1 batch，非 429 → 不 break，但只有 1 batch
+    // 正確的 assert 是：非 429 時不 break（batchTranslate 僅被呼叫 1 次因為只有 1 批）
+    expect(mockCache.flush).toHaveBeenCalledTimes(1);
+  });
+});

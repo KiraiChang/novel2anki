@@ -96,10 +96,6 @@ interface AzureResponseItem {
   translations: Array<{ text: string; to: string }>;
 }
 
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-
-const AZURE_MAX_RETRIES = 4;
-
 async function batchAzure(texts: string[], config: TranslatorConfig): Promise<string[]> {
   const headers: Record<string, string> = {
     'Ocp-Apim-Subscription-Key': config.apiKey,
@@ -107,38 +103,30 @@ async function batchAzure(texts: string[], config: TranslatorConfig): Promise<st
   };
   if (config.region) headers['Ocp-Apim-Subscription-Region'] = config.region;
 
-  const body = JSON.stringify(texts.map(t => ({ Text: t })));
+  const res = await fetch(
+    'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hant',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(texts.map(t => ({ Text: t }))),
+      signal: AbortSignal.timeout(15000),
+    },
+  );
 
-  for (let attempt = 0; attempt < AZURE_MAX_RETRIES; attempt++) {
-    const res = await fetch(
-      'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hant',
-      { method: 'POST', headers, body, signal: AbortSignal.timeout(15000) },
-    );
-
-    if (res.status === 429) {
-      if (attempt + 1 >= AZURE_MAX_RETRIES) {
-        let detail = '';
-        try { const b = await res.json() as { error?: { message?: string } }; detail = b?.error?.message ?? ''; } catch { /* ignore */ }
-        throw new Error(`Azure Translator HTTP 429${detail ? `：${detail}` : ''}（已重試 ${AZURE_MAX_RETRIES} 次）`);
-      }
-      const retryAfterSec = res.headers.get('Retry-After');
-      const waitMs = retryAfterSec ? parseInt(retryAfterSec, 10) * 1000 : Math.pow(2, attempt + 1) * 1000;
-      process.stderr.write(`\n[Azure] 429 速率限制，等待 ${waitMs / 1000}s 後重試（第 ${attempt + 1} 次）\n`);
-      await sleep(waitMs);
-      continue;
-    }
-
-    if (!res.ok) {
-      let detail = '';
-      try { const b = await res.json() as { error?: { message?: string } }; detail = b?.error?.message ?? ''; } catch { /* ignore */ }
-      throw new Error(`Azure Translator HTTP ${res.status}${detail ? `：${detail}` : ''}`);
-    }
-
-    const data = await res.json() as AzureResponseItem[];
-    return data.map(item => item.translations[0]?.text ?? '');
+  if (res.status === 429) {
+    let detail = '';
+    try { const b = await res.json() as { error?: { message?: string } }; detail = b?.error?.message ?? ''; } catch { /* ignore */ }
+    throw new Error(`Azure Translator HTTP 429${detail ? `：${detail}` : ''}`);
   }
 
-  throw new Error('Azure Translator：重試次數耗盡');
+  if (!res.ok) {
+    let detail = '';
+    try { const b = await res.json() as { error?: { message?: string } }; detail = b?.error?.message ?? ''; } catch { /* ignore */ }
+    throw new Error(`Azure Translator HTTP ${res.status}${detail ? `：${detail}` : ''}`);
+  }
+
+  const data = await res.json() as AzureResponseItem[];
+  return data.map(item => item.translations[0]?.text ?? '');
 }
 
 // ── Claude (Haiku) ────────────────────────────────────────────────────────────

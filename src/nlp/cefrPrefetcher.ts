@@ -201,6 +201,17 @@ export async function prefetchCefrZhToWordCache(
       continue;
     }
 
+    // 已有無 POS 基底翻譯（舊格式 migration 或衍生鍵）→ 複製至缺失的 POS 鍵，不重新呼叫 API
+    const baseZh = wc.getChinese(word, null);
+    if (baseZh && untranslatedPos.length > 0) {
+      for (const e of untranslatedPos) {
+        wc.setChinese(word, e.pos, baseZh, 'legacy:copied');
+      }
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
+      continue;
+    }
+
     for (const e of untranslatedPos) {
       pending.push({ word, pos: e.pos, enDef: e.def, wordIdx: i });
     }
@@ -231,7 +242,8 @@ export async function prefetchCefrZhToWordCache(
         }
       }
     } catch (e) {
-      process.stderr.write(`\n[prefetch-cefr-zh] 批次翻譯錯誤：${(e as Error).message}\n`);
+      const msg = (e as Error).message;
+      process.stderr.write(`\n[prefetch-cefr-zh] 批次翻譯錯誤：${msg}\n`);
       for (const { word, wordIdx } of chunk) {
         if (!wordsFailed.has(word) && !wordsFetched.has(word)) {
           wordsFailed.add(word);
@@ -239,6 +251,8 @@ export async function prefetchCefrZhToWordCache(
           onProgress?.(wordIdx + 1, cefrWords.length, { word, source: 'error' });
         }
       }
+      // 速率限制（429）→ 停止剩餘批次，已譯資料由 flush() 寫盤
+      if (msg.includes('429')) break;
     }
   }
 
