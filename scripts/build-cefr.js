@@ -2,16 +2,23 @@
  * 建立完整 CEFR 詞表
  *
  * 資料來源：
- *   Oxford 5000（2026-06-07 整合）
- *   GitHub: tyypgzl/Oxford-5000-words (full-word.json, 5948 entries)
- *   下載指令（一次性）：
- *     curl -s https://raw.githubusercontent.com/tyypgzl/Oxford-5000-words/main/full-word.json \
- *       -o /tmp/oxford5000-full.json
- *   處理指令（Python）：
- *     python3 scripts/process-oxford.py > /tmp/oxford.json
+ *   1. Oxford 5000（2026-06-07 整合）
+ *      GitHub: tyypgzl/Oxford-5000-words (full-word.json, 5948 entries)
+ *      下載指令（一次性）：
+ *        curl -s https://raw.githubusercontent.com/tyypgzl/Oxford-5000-words/main/full-word.json \
+ *          -o /tmp/oxford5000-full.json
+ *      處理指令（Python）：
+ *        python3 scripts/process-oxford.py > /tmp/oxford.json
  *
- *   現有 cefr-wordlist.json 已包含 Oxford 5000（4954 詞）
- *   + 奇幻/文學補充詞（657 詞），共 5611 詞。
+ *   2. American Oxford 5000（2026-06-08 新增）
+ *      官方美式英語版 B2/C1 補充詞（約 50 個美式拼字差異詞）
+ *      來源：American_Oxford_5000_by_CEFR_level.pdf
+ *      處理指令（一次性）：
+ *        python3 scripts/extract-oxford-american.py \
+ *          --input "../booking/CEFR/American_Oxford_5000_by_CEFR_level.pdf" \
+ *          --output scripts/oxford-american-b2c1.json
+ *
+ *   3. 奇幻/文學補充詞（657 詞），共 5611 詞。
  *
  * 執行：node scripts/build-cefr.js
  *   僅需新增補充詞時執行；Oxford 基礎詞表已整合至 cefr-wordlist.json。
@@ -24,6 +31,12 @@ const path = require('path');
 const existing = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../src/data/cefr-wordlist.json'), 'utf-8')
 );
+
+// ── American Oxford 5000 B2/C1 補充詞（美式英語拼字）────────────────────────
+const americanOxfordPath = path.join(__dirname, 'oxford-american-b2c1.json');
+const americanOxford = fs.existsSync(americanOxfordPath)
+  ? JSON.parse(fs.readFileSync(americanOxfordPath, 'utf-8'))
+  : {};
 
 // ── 補充詞表（Oxford 5000 / NGSL 常見詞） ──────────────────────────────────────
 // 僅列入現有表中「缺漏」的詞，避免覆蓋已有正確等級
@@ -583,8 +596,8 @@ const finalBatch = {
   recluse:'B2', hermit:'B2', sage:'B2', oracle:'B2', ascetic:'B2',
 };
 
-// ── 合併（existing 優先；supplement 只填補缺漏） ──────────────────────────────
-const merged = { ...finalBatch, ...supplement, ...existing };
+// ── 合併（existing 優先；americanOxford / supplement 只填補缺漏） ─────────────
+const merged = { ...finalBatch, ...supplement, ...americanOxford, ...existing };
 
 // 統計
 const levels = {};
