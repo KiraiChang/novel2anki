@@ -9,8 +9,9 @@ type DictData = Record<string, string>;
 interface CacheEntry { def: string; source: string; }
 type CacheData = Record<string, CacheEntry>;
 
-// word-cache-zh.json：中文翻譯快取（DeepL），可拋棄重建
-type CacheZhData = Record<string, string>;
+// word-cache-zh.json：中文翻譯快取，可拋棄重建
+export interface CacheZhEntry { zh: string; source: string; example?: string; }
+type CacheZhData = Record<string, CacheZhEntry>;
 
 export type CacheTier = 'dict' | 'cache';
 
@@ -66,17 +67,46 @@ export class WordCacheManager {
     this.dictDirty = true;
   }
 
-  /** 查找中文翻譯快取：精確 word:pos → fallback word */
+  /** 查找中文翻譯快取：精確 word:pos → fallback word，回傳 zh 字串 */
   getChinese(word: string, pos?: string | null): string | null {
     const exact = this.key(word, pos);
     const base  = this.key(word);
-    return this.cacheZh[exact] ?? this.cacheZh[base] ?? null;
+    return this.cacheZh[exact]?.zh ?? this.cacheZh[base]?.zh ?? null;
+  }
+
+  /** 精確比對 word:pos 是否已有中文翻譯（不走 fallback） */
+  hasChinese(word: string, pos: string | null): boolean {
+    return !!this.cacheZh[this.key(word, pos)];
   }
 
   /** 寫入中文翻譯快取（in-memory，呼叫 flush() 才落盤） */
-  setChinese(word: string, pos: string | null | undefined, def: string): void {
-    this.cacheZh[this.key(word, pos)] = def;
+  setChinese(word: string, pos: string | null | undefined, zh: string, source: string): void {
+    this.cacheZh[this.key(word, pos)] = { zh, source };
     this.cacheZhDirty = true;
+  }
+
+  /** 枚舉一個詞在 word-cache / word-dict 中所有 POS 條目（含無 POS 預設） */
+  getAllCacheEntriesForWord(word: string): Array<{ pos: string | null; def: string }> {
+    const w = word.toLowerCase().trim();
+    const results: Array<{ pos: string | null; def: string }> = [];
+    const seen = new Set<string | null>();
+
+    const addEntry = (pos: string | null, def: string) => {
+      if (!seen.has(pos)) { seen.add(pos); results.push({ pos, def }); }
+    };
+
+    // dict 優先
+    for (const k of Object.keys(this.dict)) {
+      if (k === w) { addEntry(null, this.dict[k]); continue; }
+      if (k.startsWith(`${w}:`)) { addEntry(k.slice(w.length + 1), this.dict[k]); }
+    }
+    // cache 補充
+    for (const k of Object.keys(this.cache)) {
+      if (k === w) { addEntry(null, this.cache[k].def); continue; }
+      if (k.startsWith(`${w}:`)) { addEntry(k.slice(w.length + 1), this.cache[k].def); }
+    }
+
+    return results;
   }
 
   /** 將 in-memory 的修改批次寫盤（dirty flag 保護，避免無謂 I/O） */
@@ -110,7 +140,15 @@ export class WordCacheManager {
 
   private loadCacheZh(): CacheZhData {
     try {
-      if (fs.existsSync(this.cacheZhPath)) return JSON.parse(fs.readFileSync(this.cacheZhPath, 'utf-8')) as CacheZhData;
+      if (!fs.existsSync(this.cacheZhPath)) return {};
+      const raw = JSON.parse(fs.readFileSync(this.cacheZhPath, 'utf-8')) as Record<string, unknown>;
+      const result: CacheZhData = {};
+      for (const [k, v] of Object.entries(raw)) {
+        // 舊格式：純字串 → 自動升級，source 標記為 'legacy'
+        if (typeof v === 'string') { result[k] = { zh: v, source: 'legacy' }; }
+        else { result[k] = v as CacheZhEntry; }
+      }
+      return result;
     } catch {}
     return {};
   }

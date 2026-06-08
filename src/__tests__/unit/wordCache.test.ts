@@ -139,7 +139,7 @@ describe('WordCacheManager', () => {
     it('should return Chinese def on base key match', () => {
       // Given
       const wc = new WordCacheManager(tmpDir);
-      wc.setChinese('run', null, '快速奔跑');
+      wc.setChinese('run', null, '快速奔跑', 'deepl');
       // When / Then
       expect(wc.getChinese('run', null)).toBe('快速奔跑');
     });
@@ -147,24 +147,102 @@ describe('WordCacheManager', () => {
     it('should fall back from word:pos to word when exact key is absent', () => {
       // Given: stored under base key only
       const wc = new WordCacheManager(tmpDir);
-      wc.setChinese('run', null, '快速奔跑');
+      wc.setChinese('run', null, '快速奔跑', 'deepl');
       // When: query with POS
       const result = wc.getChinese('run', 'verb');
       // Then: falls back to base key
       expect(result).toBe('快速奔跑');
     });
+
+    it('should return POS-specific entry when exact word:pos key exists', () => {
+      // Given: noun and base both stored
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', 'noun', '奔跑名詞', 'deepl');
+      wc.setChinese('run', null, '奔跑預設', 'deepl:derived');
+      // When: query with noun
+      expect(wc.getChinese('run', 'noun')).toBe('奔跑名詞');
+      // Then: base key still accessible separately
+      expect(wc.getChinese('run', null)).toBe('奔跑預設');
+    });
+  });
+
+  describe('hasChinese', () => {
+    it('should return false when no zh entry exists for the key', () => {
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.hasChinese('run', null)).toBe(false);
+      expect(wc.hasChinese('run', 'noun')).toBe(false);
+    });
+
+    it('should return true only for the exact key stored', () => {
+      // Given: only base key stored
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', null, '快速奔跑', 'deepl');
+      // Then: base key → true, POS key → false (no fallback)
+      expect(wc.hasChinese('run', null)).toBe(true);
+      expect(wc.hasChinese('run', 'noun')).toBe(false);
+    });
+
+    it('should return true for word:pos key when that specific POS is stored', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', 'noun', '奔跑名詞', 'deepl');
+      expect(wc.hasChinese('run', 'noun')).toBe(true);
+      expect(wc.hasChinese('run', 'verb')).toBe(false);
+    });
+  });
+
+  describe('getAllCacheEntriesForWord', () => {
+    it('should return empty array when word has no cache entries', () => {
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.getAllCacheEntriesForWord('run')).toEqual([]);
+    });
+
+    it('should return all POS-specific entries for a word', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setCache('run', 'verb', '(verb) to sprint', 'MW');
+      wc.setCache('run', 'noun', '(noun) a running race', 'MW');
+      const result = wc.getAllCacheEntriesForWord('run');
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(expect.arrayContaining([
+        { pos: 'verb', def: '(verb) to sprint' },
+        { pos: 'noun', def: '(noun) a running race' },
+      ]));
+    });
+
+    it('should include the base (no-POS) entry when present', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setCache('run', null, '(verb) to sprint', 'MW');
+      const result = wc.getAllCacheEntriesForWord('run');
+      expect(result).toContainEqual({ pos: null, def: '(verb) to sprint' });
+    });
+
+    it('should prefer dict entry over cache entry for the same POS', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setCache('run', 'verb', '(verb) cache def', 'MW');
+      wc.setDict('run', 'verb', '(verb) dict def');
+      const result = wc.getAllCacheEntriesForWord('run');
+      const verbEntry = result.find(e => e.pos === 'verb');
+      expect(verbEntry?.def).toBe('(verb) dict def');
+    });
   });
 
   describe('flush (Chinese cache)', () => {
-    it('should write word-cache-zh.json to disk after setChinese', () => {
+    it('should write word-cache-zh.json with object format after setChinese', () => {
       // Given
       const wc = new WordCacheManager(tmpDir);
-      wc.setChinese('run', null, '快速奔跑');
+      wc.setChinese('run', null, '快速奔跑', 'deepl');
       // When
       wc.flush();
-      // Then
+      // Then: 新格式 { zh, source }
       const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'word-cache-zh.json'), 'utf-8'));
-      expect(data['run']).toBe('快速奔跑');
+      expect(data['run']).toEqual({ zh: '快速奔跑', source: 'deepl' });
+    });
+
+    it('should write POS-specific key when setChinese is called with pos', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', 'noun', '奔跑名詞', 'azure');
+      wc.flush();
+      const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'word-cache-zh.json'), 'utf-8'));
+      expect(data['run:noun']).toEqual({ zh: '奔跑名詞', source: 'azure' });
     });
 
     it('should not create word-cache-zh.json when only English cache was changed', () => {
@@ -175,6 +253,30 @@ describe('WordCacheManager', () => {
       wc.flush();
       // Then
       expect(fs.existsSync(path.join(tmpDir, 'word-cache-zh.json'))).toBe(false);
+    });
+  });
+
+  describe('loadCacheZh — migration from legacy string format', () => {
+    it('should load old plain-string entries as {zh, source: legacy}', () => {
+      // Given: old format file
+      const legacyData = { run: '快速奔跑', bear: '熊' };
+      fs.writeFileSync(path.join(tmpDir, 'word-cache-zh.json'), JSON.stringify(legacyData));
+      // When
+      const wc = new WordCacheManager(tmpDir);
+      // Then: getChinese still works
+      expect(wc.getChinese('run', null)).toBe('快速奔跑');
+      expect(wc.getChinese('bear', null)).toBe('熊');
+    });
+
+    it('should mark migrated entries with source=legacy after flush', () => {
+      // Given: old format file
+      fs.writeFileSync(path.join(tmpDir, 'word-cache-zh.json'), JSON.stringify({ run: '快速奔跑' }));
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run:extra', null, '額外', 'test'); // trigger dirty flag
+      wc.flush();
+      // Then: migrated entry has source=legacy
+      const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'word-cache-zh.json'), 'utf-8'));
+      expect(data['run']).toEqual({ zh: '快速奔跑', source: 'legacy' });
     });
   });
 
@@ -199,7 +301,7 @@ describe('WordCacheManager', () => {
     it('should load Chinese cache from existing file on construction', () => {
       // Given
       const wc1 = new WordCacheManager(tmpDir);
-      wc1.setChinese('run', null, '快速奔跑');
+      wc1.setChinese('run', null, '快速奔跑', 'deepl');
       wc1.flush();
       // When
       const wc2 = new WordCacheManager(tmpDir);

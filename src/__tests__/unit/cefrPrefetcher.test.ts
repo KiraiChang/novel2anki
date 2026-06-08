@@ -8,13 +8,15 @@ import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from '../../nlp/ce
 // ── 共用 mock ─────────────────────────────────────────────────────────────────
 
 const mockCache = {
-  get:        jest.fn(),
-  getChinese: jest.fn(),
-  setCache:   jest.fn(),
-  setDict:    jest.fn(),
-  setChinese: jest.fn(),
-  flush:      jest.fn(),
-  cacheSize:  0,
+  get:                      jest.fn(),
+  getChinese:               jest.fn(),
+  setCache:                 jest.fn(),
+  setDict:                  jest.fn(),
+  setChinese:               jest.fn(),
+  flush:                    jest.fn(),
+  hasChinese:               jest.fn(),
+  getAllCacheEntriesForWord: jest.fn(),
+  cacheSize:                0,
 };
 
 const origMwKey  = process.env.MW_API_KEY;
@@ -28,8 +30,10 @@ const DEEPL_CONFIG = { provider: 'deepl' as const, apiKey: 'test-deepl-key' };
 beforeEach(() => {
   jest.clearAllMocks();
   (getWordCache as jest.Mock).mockReturnValue(mockCache);
-  mockCache.get.mockReturnValue(null);        // 預設：英文 cache miss
-  mockCache.getChinese.mockReturnValue(null); // 預設：中文 cache miss
+  mockCache.get.mockReturnValue(null);                    // 預設：英文 cache miss（供 prefetchCefrToWordCache）
+  mockCache.getChinese.mockReturnValue(null);             // 預設：中文 cache miss（保留相容性）
+  mockCache.hasChinese.mockReturnValue(false);            // 預設：無任何 zh 快取
+  mockCache.getAllCacheEntriesForWord.mockReturnValue([]); // 預設：無英文條目
   delete process.env.MW_API_KEY;
   global.fetch = jest.fn();
 });
@@ -264,9 +268,10 @@ describe('prefetchCefrToWordCache — flush and counts', () => {
 // ── prefetchCefrZhToWordCache ─────────────────────────────────────────────────
 
 describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
-  it('should skip word and increment skippedCount when Chinese cache already has entry', async () => {
-    // Given
-    mockCache.getChinese.mockReturnValue('快速奔跑');
+  it('should skip word and increment skippedCount when all POS entries are already cached', async () => {
+    // Given: run 有 verb 條目，且 verb + default 都已翻譯
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
+    mockCache.hasChinese.mockReturnValue(true);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
     // Then
@@ -275,9 +280,10 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
     expect(batchTranslate).not.toHaveBeenCalled();
   });
 
-  it('should report source=cached in progress callback for Chinese cache hit', async () => {
+  it('should report source=cached in progress callback when all POS entries are already cached', async () => {
     // Given
-    mockCache.getChinese.mockReturnValue('快速奔跑');
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
+    mockCache.hasChinese.mockReturnValue(true);
     const sources: string[] = [];
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['run']);
@@ -287,10 +293,9 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
 });
 
 describe('prefetchCefrZhToWordCache — no English definition', () => {
-  it('should increment noEnCount and skip DeepL when no English definition in cache', async () => {
-    // Given: 中文 miss、英文也 miss
-    mockCache.getChinese.mockReturnValue(null);
-    mockCache.get.mockReturnValue(null);
+  it('should increment noEnCount and skip translation when no English entries in cache', async () => {
+    // Given: getAllCacheEntriesForWord 回傳空陣列（無英文定義）
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
     // Then
@@ -300,10 +305,10 @@ describe('prefetchCefrZhToWordCache — no English definition', () => {
   });
 });
 
-describe('prefetchCefrZhToWordCache — DeepL translation', () => {
-  it('should call batchTranslate with English definition for cache misses', async () => {
-    // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+describe('prefetchCefrZhToWordCache — translation', () => {
+  it('should call batchTranslate with English definition for each untranslated POS entry', async () => {
+    // Given: run 有 verb 條目，尚未翻譯
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
@@ -314,19 +319,19 @@ describe('prefetchCefrZhToWordCache — DeepL translation', () => {
     );
   });
 
-  it('should store Chinese translation via setChinese with base (POS-agnostic) key', async () => {
+  it('should store Chinese translation with POS key and source', async () => {
     // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
-    // Then
-    expect(mockCache.setChinese).toHaveBeenCalledWith('run', null, '快速奔跑');
+    // Then: POS 鍵帶 source
+    expect(mockCache.setChinese).toHaveBeenCalledWith('run', 'verb', '快速奔跑', 'deepl');
   });
 
-  it('should increment fetchedCount on successful translation', async () => {
+  it('should increment fetchedCount once per word on successful translation', async () => {
     // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
@@ -337,7 +342,7 @@ describe('prefetchCefrZhToWordCache — DeepL translation', () => {
 
   it('should increment failedCount when batchTranslate throws', async () => {
     // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockRejectedValue(new Error('DeepL quota exceeded'));
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
@@ -352,9 +357,9 @@ describe('prefetchCefrZhToWordCache — inter-batch delay', () => {
   afterEach(() => { jest.useRealTimers(); });
 
   it('should insert 500ms delay between batches when processing more than one batch', async () => {
-    // Given: 51 words → 2 batches (first 50, then 1)
+    // Given: 51 words × 1 POS each → 51 pending items → 2 batches (50 + 1)
     const words = Array.from({ length: 51 }, (_, i) => `word${i}`);
-    mockCache.get.mockReturnValue({ def: '(noun) test definition text', tier: 'cache' });
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test definition text' }]);
     (batchTranslate as jest.Mock)
       .mockResolvedValueOnce(Array(50).fill('翻譯'))
       .mockResolvedValueOnce(['翻譯']);
@@ -368,8 +373,8 @@ describe('prefetchCefrZhToWordCache — inter-batch delay', () => {
   });
 
   it('should NOT insert delay before the first batch', async () => {
-    // Given: 3 words → single batch, no inter-batch delay needed
-    mockCache.get.mockReturnValue({ def: '(noun) test definition text', tier: 'cache' });
+    // Given: 3 words × 1 POS each → 3 pending items → single batch, no inter-batch delay needed
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test definition text' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['翻譯', '翻譯', '翻譯']);
     const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
     // When
@@ -385,7 +390,7 @@ describe('prefetchCefrZhToWordCache — inter-batch delay', () => {
 describe('prefetchCefrZhToWordCache — flush and counts', () => {
   it('should call flush() exactly once after processing all words', async () => {
     // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑', '熊', '去']);
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
@@ -394,14 +399,13 @@ describe('prefetchCefrZhToWordCache — flush and counts', () => {
   });
 
   it('should return correct counts for mixed results', async () => {
-    // Given: run→中文快取命中, bear→翻譯成功, go→無英文定義
-    mockCache.getChinese
-      .mockReturnValueOnce('快速奔跑')  // run → cached
-      .mockReturnValueOnce(null)        // bear → miss
-      .mockReturnValueOnce(null);       // go → miss
-    mockCache.get
-      .mockReturnValueOnce({ def: '(noun) a large mammal', tier: 'cache' }) // bear → has en
-      .mockReturnValueOnce(null);                                            // go → no en
+    // Given: run→全部已快取(skip), bear→有 noun 待翻譯, go→無英文條目
+    mockCache.getAllCacheEntriesForWord.mockImplementation((word: string) => {
+      if (word === 'run')  return [{ pos: 'verb', def: '(verb) to run fast' }];
+      if (word === 'bear') return [{ pos: 'noun', def: '(noun) a large mammal' }];
+      return [];  // go → no en
+    });
+    mockCache.hasChinese.mockImplementation((word: string) => word === 'run');
     (batchTranslate as jest.Mock).mockResolvedValue(['熊']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
@@ -411,5 +415,81 @@ describe('prefetchCefrZhToWordCache — flush and counts', () => {
     expect(result.fetchedCount).toBe(1);
     expect(result.noEnCount).toBe(1);
     expect(result.failedCount).toBe(0);
+  });
+});
+
+// ── prefetchCefrZhToWordCache — POS-specific translation ──────────────────────
+
+describe('prefetchCefrZhToWordCache — POS-specific translation', () => {
+  it('should translate each POS entry separately and store with POS key + source', async () => {
+    // Given: cross 有 noun 和 verb 兩個條目
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) a cross-shaped object' },
+      { pos: 'verb', def: '(verb) to cross a river' },
+    ]);
+    (batchTranslate as jest.Mock).mockResolvedValue(['十字形物體', '渡過河流']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
+    // Then: 每個 POS 各存一筆，帶 source
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'noun', '十字形物體', 'deepl');
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'verb', '渡過河流', 'deepl');
+  });
+
+  it('should set default key to noun translation when noun POS is available', async () => {
+    // Given: cross 有 noun + verb，預設鍵尚未設定
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) a cross-shaped object' },
+      { pos: 'verb', def: '(verb) to cross a river' },
+    ]);
+    // hasChinese(word, null) = false → 需衍生預設鍵
+    mockCache.hasChinese.mockReturnValue(false);
+    (batchTranslate as jest.Mock).mockResolvedValue(['十字形物體', '渡過河流']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
+    // Then: 預設鍵使用名詞翻譯，source 標為 derived
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', null, '十字形物體', 'deepl:derived');
+  });
+
+  it('should use first available POS as default when no noun exists', async () => {
+    // Given: run 只有 verb（無 noun）
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'verb', def: '(verb) to run fast' },
+      { pos: 'adjective', def: '(adjective) running' },
+    ]);
+    mockCache.hasChinese.mockReturnValue(false);
+    (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑', '奔跑的']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then: 無名詞時取第一個 POS（verb）的翻譯作為預設
+    expect(mockCache.setChinese).toHaveBeenCalledWith('run', null, '快速奔跑', 'deepl:derived');
+  });
+
+  it('should skip already-cached POS entries and only translate uncached ones', async () => {
+    // Given: cross 有 noun（已快取）+ verb（未快取）
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) a cross-shaped object' },
+      { pos: 'verb', def: '(verb) to cross a river' },
+    ]);
+    mockCache.hasChinese.mockImplementation((_: string, pos: string | null) => pos === 'noun');
+    (batchTranslate as jest.Mock).mockResolvedValue(['渡過河流']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
+    // Then: 只翻譯 verb，不重翻 noun
+    expect(batchTranslate).toHaveBeenCalledWith(['(verb) to cross a river'], DEEPL_CONFIG);
+    expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'verb', '渡過河流', 'deepl');
+    expect(mockCache.setChinese).not.toHaveBeenCalledWith('cross', 'noun', expect.anything(), expect.anything());
+  });
+
+  it('should increment fetchedCount once per word even when word has multiple POS entries', async () => {
+    // Given: cross 有兩個 POS
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([
+      { pos: 'noun', def: '(noun) a cross' },
+      { pos: 'verb', def: '(verb) to cross' },
+    ]);
+    (batchTranslate as jest.Mock).mockResolvedValue(['十字', '渡過']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
+    // Then: 一個詞只算一次 fetched
+    expect(result.fetchedCount).toBe(1);
   });
 });

@@ -142,10 +142,10 @@ const INTER_BATCH_DELAY_MS = 500;
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /**
- * 批次預查 CEFR 字庫的 DeepL 中文定義，結果存入 word-cache-zh.json。
- * 已有中文快取的詞自動跳過，可中斷後重跑。
- * 需先執行 --prefetch-cefr 建立英文定義快取。
- * @param deeplConfig DeepL API 設定
+ * 批次預查 CEFR 字庫的中文定義，結果存入 word-cache-zh.json。
+ * 每個 POS 條目（word:noun / word:verb 等）各存一筆，並衍生一筆無 POS 的預設鍵（名詞優先）。
+ * 已有中文快取的條目自動跳過，可中斷後重跑。
+ * @param deeplConfig 翻譯設定（provider 決定 source 欄位）
  * @param onProgress 進度回呼
  * @param _words 覆寫詞列表（測試用）
  */
@@ -158,33 +158,60 @@ export async function prefetchCefrZhToWordCache(
     JSON.parse(fs.readFileSync(CEFR_PATH, 'utf-8')) as Record<string, string>,
   );
 
-  const wc = getWordCache();
+  const wc       = getWordCache();
+  const provider = deeplConfig.provider;
   let fetchedCount = 0;
   let skippedCount = 0;
   let noEnCount    = 0;
   let failedCount  = 0;
 
-  // 收集需要翻譯的詞與對應英文定義
-  const pending: Array<{ word: string; enDef: string; idx: number }> = [];
+  // 每個需翻譯的 POS 條目為一筆 pending item
+  const pending: Array<{ word: string; pos: string | null; enDef: string; wordIdx: number }> = [];
+  // 需要在翻譯後衍生預設（無 POS）鍵的詞
+  const wordsNeedingDefault = new Set<string>();
 
   for (let i = 0; i < cefrWords.length; i++) {
-    const word = cefrWords[i];
+    const word       = cefrWords[i];
+    const allEntries = wc.getAllCacheEntriesForWord(word);
+    const posEntries = allEntries.filter(e => e.pos !== null);
 
-    if (wc.getChinese(word, null) !== null) {
-      skippedCount++;
-      onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
-      continue;
-    }
-
-    const enHit = wc.get(word, null);
-    if (!enHit) {
+    if (allEntries.length === 0) {
       noEnCount++;
       onProgress?.(i + 1, cefrWords.length, { word, source: 'no-en' });
       continue;
     }
 
-    pending.push({ word, enDef: enHit.def, idx: i });
+    if (posEntries.length === 0) {
+      // 舊格式：僅有無 POS 條目，沿用舊邏輯
+      if (wc.hasChinese(word, null)) {
+        skippedCount++;
+        onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
+      } else {
+        pending.push({ word, pos: null, enDef: allEntries[0].def, wordIdx: i });
+      }
+      continue;
+    }
+
+    const untranslatedPos = posEntries.filter(e => !wc.hasChinese(word, e.pos));
+    const needDefault     = !wc.hasChinese(word, null);
+
+    if (untranslatedPos.length === 0 && !needDefault) {
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
+      continue;
+    }
+
+    for (const e of untranslatedPos) {
+      pending.push({ word, pos: e.pos, enDef: e.def, wordIdx: i });
+    }
+    if (needDefault) wordsNeedingDefault.add(word);
   }
+
+  // 本次翻譯結果的本地暫存（避免衍生預設鍵時需重查 mock）
+  const localZh = new Map<string, string>(); // `word\0pos` → zh
+
+  const wordsFetched = new Set<string>();
+  const wordsFailed  = new Set<string>();
 
   // 分批翻譯
   for (let b = 0; b < pending.length; b += DEEPL_BATCH) {
@@ -193,19 +220,37 @@ export async function prefetchCefrZhToWordCache(
     try {
       const translated = await batchTranslate(chunk.map(c => c.enDef), deeplConfig);
       for (let j = 0; j < chunk.length; j++) {
-        const { word, idx } = chunk[j];
+        const { word, pos, wordIdx } = chunk[j];
         const zh = translated[j] ?? '';
-        wc.setChinese(word, null, zh);
-        fetchedCount++;
-        onProgress?.(idx + 1, cefrWords.length, { word, source: 'deepl' });
+        wc.setChinese(word, pos, zh, provider);
+        localZh.set(`${word}\0${pos ?? ''}`, zh);
+        if (!wordsFetched.has(word)) {
+          wordsFetched.add(word);
+          fetchedCount++;
+          onProgress?.(wordIdx + 1, cefrWords.length, { word, source: 'deepl' });
+        }
       }
     } catch (e) {
       process.stderr.write(`\n[prefetch-cefr-zh] 批次翻譯錯誤：${(e as Error).message}\n`);
-      for (const { word, idx } of chunk) {
-        failedCount++;
-        onProgress?.(idx + 1, cefrWords.length, { word, source: 'error' });
+      for (const { word, wordIdx } of chunk) {
+        if (!wordsFailed.has(word) && !wordsFetched.has(word)) {
+          wordsFailed.add(word);
+          failedCount++;
+          onProgress?.(wordIdx + 1, cefrWords.length, { word, source: 'error' });
+        }
       }
     }
+  }
+
+  // 衍生預設（無 POS）鍵：名詞優先，否則取第一個 POS
+  for (const word of wordsNeedingDefault) {
+    if (wc.hasChinese(word, null)) continue;
+    const posEntries = wc.getAllCacheEntriesForWord(word).filter(e => e.pos !== null);
+    const chosenPos  = (posEntries.find(e => e.pos === 'noun') ?? posEntries[0])?.pos ?? null;
+    if (!chosenPos) continue;
+    const zh = localZh.get(`${word}\0${chosenPos}`)
+      ?? (wc.hasChinese(word, chosenPos) ? wc.getChinese(word, chosenPos) : null);
+    if (zh) wc.setChinese(word, null, zh, `${provider}:derived`);
   }
 
   wc.flush();
