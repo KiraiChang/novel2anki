@@ -347,6 +347,41 @@ describe('prefetchCefrZhToWordCache — DeepL translation', () => {
   });
 });
 
+describe('prefetchCefrZhToWordCache — inter-batch delay', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('should insert 500ms delay between batches when processing more than one batch', async () => {
+    // Given: 51 words → 2 batches (first 50, then 1)
+    const words = Array.from({ length: 51 }, (_, i) => `word${i}`);
+    mockCache.get.mockReturnValue({ def: '(noun) test definition text', tier: 'cache' });
+    (batchTranslate as jest.Mock)
+      .mockResolvedValueOnce(Array(50).fill('翻譯'))
+      .mockResolvedValueOnce(['翻譯']);
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    // When
+    const promise = prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, words);
+    await jest.runAllTimersAsync();
+    await promise;
+    // Then: setTimeout called with 500ms inter-batch delay
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 500);
+  });
+
+  it('should NOT insert delay before the first batch', async () => {
+    // Given: 3 words → single batch, no inter-batch delay needed
+    mockCache.get.mockReturnValue({ def: '(noun) test definition text', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockResolvedValue(['翻譯', '翻譯', '翻譯']);
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    // When
+    const promise = prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    await jest.runAllTimersAsync();
+    await promise;
+    // Then: no 500ms delay calls
+    const delay500 = setTimeoutSpy.mock.calls.find(args => args[1] === 500);
+    expect(delay500).toBeUndefined();
+  });
+});
+
 describe('prefetchCefrZhToWordCache — flush and counts', () => {
   it('should call flush() exactly once after processing all words', async () => {
     // Given

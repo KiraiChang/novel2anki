@@ -278,6 +278,109 @@ describe('batchTranslate — Azure', () => {
   });
 });
 
+// ── batchTranslate — Azure 429 retry ─────────────────────────────────────────
+
+describe('batchTranslate — Azure 429 retry', () => {
+  const azureConfig = { provider: 'azure' as const, apiKey: 'azure-key', region: 'eastasia' };
+
+  const make429 = (retryAfterSec?: string) => ({
+    status: 429,
+    ok: false,
+    headers: { get: (h: string) => h === 'Retry-After' ? (retryAfterSec ?? null) : null },
+    json: async () => ({}),
+  });
+
+  const make200 = () => ({
+    ok: true,
+    json: async () => [{ translations: [{ text: '快速奔跑', to: 'zh-Hant' }] }],
+  });
+
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('should retry and return successful translation after a single 429 response', async () => {
+    // Given
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(make429())
+      .mockResolvedValueOnce(make200());
+    // When
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.runAllTimersAsync();
+    const result = await promise;
+    // Then
+    expect(result).toEqual(['快速奔跑']);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('should NOT send second request before Retry-After delay has elapsed', async () => {
+    // Given: Retry-After: 3 seconds
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(make429('3'))
+      .mockResolvedValueOnce(make200());
+    // When: advance only 2 seconds (not yet 3)
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.advanceTimersByTimeAsync(2000);
+    // Then: second call not yet sent
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Cleanup: drain so promise resolves
+    await jest.runAllTimersAsync();
+    await promise;
+  });
+
+  it('should send second request after full Retry-After seconds have elapsed', async () => {
+    // Given: Retry-After: 3 seconds
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(make429('3'))
+      .mockResolvedValueOnce(make200());
+    // When: advance full 3 seconds
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.advanceTimersByTimeAsync(3000);
+    await promise;
+    // Then
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('should NOT trigger second fetch within 2s when no Retry-After header (exponential backoff starts at 2s)', async () => {
+    // Given: no Retry-After → first retry waits 2^1 = 2000ms
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(make429())
+      .mockResolvedValueOnce(make200());
+    // When: advance only 1.9s
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.advanceTimersByTimeAsync(1900);
+    // Then: second fetch not yet triggered
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Cleanup
+    await jest.runAllTimersAsync();
+    await promise;
+  });
+
+  it('should throw error mentioning retry count after all AZURE_MAX_RETRIES attempts return 429', async () => {
+    // Given: every response is 429
+    (global.fetch as jest.Mock).mockResolvedValue(make429());
+    // When
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.runAllTimersAsync();
+    // Then
+    await expect(promise).rejects.toThrow('已重試 4 次');
+  });
+
+  it('should write stderr warning message on each 429 retry', async () => {
+    // Given
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(make429())
+      .mockResolvedValueOnce(make200());
+    // When
+    const promise = batchTranslate(['to sprint'], azureConfig);
+    await jest.runAllTimersAsync();
+    await promise;
+    // Then
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('429'));
+    stderrSpy.mockRestore();
+  });
+});
+
 // ── batchTranslate — Claude ───────────────────────────────────────────────────
 
 describe('batchTranslate — Claude', () => {

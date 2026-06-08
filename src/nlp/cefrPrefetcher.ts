@@ -137,6 +137,9 @@ export interface PrefetchZhResult {
 }
 
 const DEEPL_BATCH = 50;
+const INTER_BATCH_DELAY_MS = 500;
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /**
  * 批次預查 CEFR 字庫的 DeepL 中文定義，結果存入 word-cache-zh.json。
@@ -185,6 +188,7 @@ export async function prefetchCefrZhToWordCache(
 
   // 分批翻譯
   for (let b = 0; b < pending.length; b += DEEPL_BATCH) {
+    if (b > 0) await sleep(INTER_BATCH_DELAY_MS);
     const chunk = pending.slice(b, b + DEEPL_BATCH);
     try {
       const translated = await batchTranslate(chunk.map(c => c.enDef), deeplConfig);
