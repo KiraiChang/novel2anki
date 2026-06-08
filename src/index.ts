@@ -27,6 +27,7 @@ import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv } from './csv/beginnerDeeplTranslator';
 import { getWordCache } from './nlp/wordCache';
+import { fillVocabTranslationsFromCache } from './cards/translationFiller';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
@@ -354,6 +355,7 @@ program
         console.log(chalk.green(`✓ 字彙統計 HTML：${statsHtmlPath}`));
 
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
+        fillVocabTranslationsFromCache(csvCards);
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
         const apkgPath = await exportToApkg(csvCards, deckName, options.output);
@@ -382,6 +384,7 @@ program
         }
         const vocabCards = mergeTokensToVocabCards(tokens);
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
+        fillVocabTranslationsFromCache(csvCards);
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
         const apkgPath = await exportToApkg(csvCards, deckName, options.output);
@@ -408,6 +411,7 @@ program
         process.exit(1);
       }
       console.log('');
+      fillVocabTranslationsFromCache(csvCards);
       console.log(chalk.yellow('正在匯出檔案...'));
       const apkgPath = await exportToApkg(csvCards, deckName, options.output);
       const htmlPath = exportToHtml(csvCards, deckName, options.output);
@@ -752,6 +756,8 @@ program
       });
       allCards.character = chunkResults.flatMap(({ cards }) => cards.character);
     }
+
+    fillVocabTranslationsFromCache(allCards);
 
     const total = allCards.vocab.length + allCards.cloze.length + allCards.character.length + allCards.plot.length;
     console.log('');
