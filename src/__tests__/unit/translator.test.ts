@@ -360,9 +360,11 @@ describe('batchTranslate — Azure 429 retry', () => {
     (global.fetch as jest.Mock).mockResolvedValue(make429());
     // When
     const promise = batchTranslate(['to sprint'], azureConfig);
+    // Register rejection handler BEFORE running timers to avoid unhandled rejection
+    const assertion = expect(promise).rejects.toThrow('已重試 4 次');
     await jest.runAllTimersAsync();
     // Then
-    await expect(promise).rejects.toThrow('已重試 4 次');
+    await assertion;
   });
 
   it('should write stderr warning message on each 429 retry', async () => {
