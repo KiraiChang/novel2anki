@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { DeepLConfig, batchTranslate } from '../cards/deeplTranslator';
 import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
+import { getWordCache } from '../nlp/wordCache';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -156,29 +157,40 @@ async function fetchDefinitionFromFreeDict(
   return null;
 }
 
-// ── 對外介面：MW 優先，失敗則 fallback Free Dictionary ─────────────────────────
+// ── 對外介面：word-dict → word-cache → MW → Free Dictionary ────────────────────
 
-export type DictSource = 'MW' | 'free' | 'fallback' | 'cached';
+export type DictSource = 'MW' | 'free' | 'fallback' | 'cached' | 'dict';
 
 async function fetchEnglishDefinition(
   word: string,
   pos?: string,
 ): Promise<{ def: string; source: DictSource }> {
+  // Layer 2 & 3：個人單字庫 / 自動快取（命中即回傳，不打 API）
+  const hit = getWordCache().get(word, pos);
+  if (hit) return { def: hit.def, source: hit.tier === 'dict' ? 'dict' : 'cached' };
+
   const targetPOS = pos ? normalizePOS(pos) : null;
   const mwKey = process.env.MW_API_KEY;
 
   if (mwKey) {
     try {
       const def = await fetchDefinitionFromMW(word, targetPOS, mwKey);
-      if (def) return { def, source: 'MW' };
+      if (def) {
+        getWordCache().setCache(word, pos, def, 'MW');
+        return { def, source: 'MW' };
+      }
     } catch { /* fallthrough to free dict */ }
   }
 
   try {
     const def = await fetchDefinitionFromFreeDict(word, targetPOS);
-    if (def) return { def, source: 'free' };
+    if (def) {
+      getWordCache().setCache(word, pos, def, 'free');
+      return { def, source: 'free' };
+    }
   } catch { /* fallthrough to word itself */ }
 
+  getWordCache().setCache(word, pos, word, 'fallback');
   return { def: word, source: 'fallback' };
 }
 
@@ -277,6 +289,7 @@ export async function fetchBeginnerWordsMW(
     return cols.map(escapeField).join(',');
   });
   fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+  getWordCache().flush();
 
   return { fetchedCount: needFetch.length, skippedCount, outputPath: csvPath };
 }
@@ -443,7 +456,50 @@ export async function translateBeginnerWordsCsv(
   const headerLine = headers.map(escapeField).join(',');
   const dataLines = rows.map(cols => cols.map(escapeField).join(','));
   fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+  getWordCache().flush();
   onProgress?.(1, 1, 'write');
 
   return { translatedCount: needTranslation.length, skippedCount, outputPath: csvPath };
+}
+
+// ── 個人單字庫升級 ────────────────────────────────────────────────────────────
+
+export interface UpdateDictResult {
+  updatedCount: number;
+  skippedCount: number;
+}
+
+/**
+ * 將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json）。
+ * 未來所有書遇到相同 word:pos 時，將優先使用此精選定義，不再查 MW。
+ */
+export async function updateWordDictFromCsv(
+  csvPath: string,
+  onProgress?: (current: number, total: number, word?: string) => void,
+): Promise<UpdateDictResult> {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) return { updatedCount: 0, skippedCount: 0 };
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  const cache = getWordCache();
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  rows.forEach((cols, i) => {
+    const lemma = get(cols, 'lemma').trim();
+    const pos   = get(cols, 'pos').trim();
+    const defEn = get(cols, 'definition_en').trim();
+    if (!lemma || !defEn) { skippedCount++; return; }
+    cache.setDict(lemma, pos || undefined, defEn);
+    updatedCount++;
+    onProgress?.(i + 1, rows.length, lemma);
+  });
+
+  cache.flush();
+  return { updatedCount, skippedCount };
 }

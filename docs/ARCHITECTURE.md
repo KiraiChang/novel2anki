@@ -94,11 +94,20 @@ beginnerExporter.ts
   ├─ *-beginner-words-part-NN.csv（8 欄，分割版）       ← --beginner-split N
   └─ *-beginner-names.txt（純文字人名表）               ← --beginner（供翻譯前確認）
 
-  words CSV 欄位（8 欄）：
+  words CSV 欄位（9 欄）：
     lemma | pos | cefr_level | coverage_rank | global_frequency |
-    context_sentence | context_sentence_zh | definition_zh
+    definition_en | context_sentence | context_sentence_zh | definition_zh
 
-  [選用] beginnerDeeplTranslator.ts（--deepl / --deepl-force）
+  [選用] beginnerDeeplTranslator.ts（--mw / --deepl / --deepl-force / --update-dict）
+
+    estimateMWFetch(csvPaths)
+      → { unfetchedCount }（統計尚未預查的列數）
+
+    fetchBeginnerWordsMW(csvPath, onProgress?, { force? })
+      → 寫入 definition_en 欄（MW → cache → 寫回 CSV）；舊格式 CSV 自動插入欄位
+      → getWordCache().flush() 批次落盤（dirty flag 保護）
+      進度標記：[字典] / [MW] / [Free] / [快取] / [fallback]
+
     estimateBeginnerTranslate(csvPaths, { force? })
       → 統計未翻譯列數（force 時計全部）、字元量、費用預估
 
@@ -106,18 +115,21 @@ beginnerExporter.ts
       prebuiltNames: 從 *-beginner-names.txt 讀入的 Set<string>（優先使用）
       若未傳入則從本批句子動態偵測（backward compat fallback）
 
-      Phase 1 — 字典查詢（MW 優先，Free Dictionary 為 fallback）
+      Phase 1 — 字典查詢（三層查找：word-dict → word-cache → MW API）
         for each lemma:
-          normalizePOS(pos)  CSV 詞性 → API 詞性字串（小寫）
-          ① 若設定 MW_API_KEY：
+          ① getWordCache().get(lemma, pos) → 命中則直接使用，source='dict' 或 'cached'
+          ② cache miss：normalizePOS(pos)  CSV 詞性 → API 詞性字串（小寫）
+             若設定 MW_API_KEY：
                GET dictionaryapi.com/api/v3/references/learners/json/{lemma}?key=…
                （Merriam-Webster Learner's Dictionary；非 Collegiate）
                找符合 POS 的 entry → shortdef[0]（isUsableMW 過濾 see/compare 開頭）
                HTTP 非 200 時印 stderr 錯誤訊息（key 類型錯誤警告）
-          ② MW 失敗或無 key：
+             MW 失敗或無 key：
                GET dictionaryapi.dev/api/v2/entries/en/{lemma}
                找符合 POS 的 meaning → definitions[0]（isUsableFree 過濾交叉參照）
-          fallback → 同詞第一可用意義 → 或詞彙本身（兩個 API 皆無收錄時）
+             fallback → 同詞第一可用意義 → 或詞彙本身（兩個 API 皆無收錄時）
+             → getWordCache().setCache(word, pos, def, source)
+          若 CSV 中 definition_en 已填寫（--mw 預查或手動填入）→ 直接使用，跳過 API
 
       Phase 2 — DeepL 批次翻譯（目標語言：zh-HANT 繁體中文）
         NER 人名保護（翻譯前）：
@@ -139,6 +151,10 @@ beginnerExporter.ts
         context_sentence_zh ← sentZh[j]（已有內容跳過；force 模式強制覆寫）
 
     --deepl-force：needTranslation = 全部列（不過濾已翻譯）
+
+    updateWordDictFromCsv(csvPath, onProgress?)
+      → 讀 CSV 的 definition_en 欄 → getWordCache().setDict(lemma, pos, defEn) → flush()
+      → 回傳 { updatedCount, skippedCount }（definition_en 空白或無 lemma 的列跳過）
 
   [CSV 輸入 → 字卡輸出路徑（已翻譯 CSV 直接匯出）]
     computeBeginnerWordStats(csvPaths)
@@ -187,11 +203,12 @@ beginnerExporter.ts
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
 | 例句評分 | `src/nlp/sentenceScorer.ts` | Sentence Mining 評分：為每個詞選出「離開原書後仍能獨立理解且能推測詞義」的例句；對話句（引號 / em dash）`-5`、代詞開頭（He/She/They…）`-2`、說話動詞 `-1`、純敘述 `+2`、長度 40–120 `+5` |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
-| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（8 欄，含 `global_frequency`）+ 分割版 words CSV + `*-beginner-names.txt`（人名表） |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（9 欄，含 `definition_en` 預查欄）+ 分割版 words CSV + `*-beginner-names.txt`（人名表） |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
 | NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫）、`protectNames()` / `restoreNames()`（`__PERSON_N__` 佔位符）、`saveNamesFile()` / `loadNamesFile()`（純文字 I/O） |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | 三階段翻譯管線：① 字典查詢（MW Learner's API 優先，Free Dict fallback，POS 比對 + `isUsable` 過濾，onProgress 回報 source 標記）→ ② NER 人名保護（優先使用 `prebuiltNames`）+ 交錯批次送 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）+ 還原人名 → ③ 覆寫 CSV；支援 `force` 模式全列重譯 |
+| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | MW 預查 + DeepL 三階段翻譯管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫） |
+| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：三層查找快取（word-dict.json 精選 / word-cache.json 自動）；`get(word, pos)` 回傳 `{ def, tier }` 或 null；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton，整個 session 共用。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫）；key 格式 `word:pos`，無 POS 時用 `word` |
 
 ## 核心型別
 

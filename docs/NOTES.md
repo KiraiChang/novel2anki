@@ -54,3 +54,9 @@
 - **離線模式改循序呼叫**：Claude API 模式使用 `Promise.all` 並行發出 4 個請求；Ollama 模式改為循序 `await`，原因是本地 Ollama 同一時間只能跑一個推理任務，並行請求不會加速，徒增 HTTP 連線開銷。
 
 - **不引入 `ollama` npm 套件**：Node 18+ 內建的 `fetch()` 足以呼叫 Ollama REST API，不引入額外套件可降低相依風險，且 `fetch` API 對使用者更易讀。
+
+- **個人單字庫採 `word:pos` 為 key，不綁定書籍語境**（`src/nlp/wordCache.ts`，2026-06-08）：若用 `word` 作 key，`bear` 的名詞定義會污染動詞查詢（反之亦然）。改用 `word:pos`（如 `bear:verb`、`bear:noun`）後，每個 POS 各自獨立快取，不同書中相同字的不同用法互不干擾。查找時精確匹配 `word:pos` → fallback 到 `word`（無 POS 時的通用快取），向下相容無 POS 的舊資料。
+
+- **三層快取設計的邊界清晰度**（`src/nlp/wordCache.ts`）：`word-dict.json`（精選）永遠不被程式自動覆寫，只有 `--update-dict` 時由使用者明確升級；`word-cache.json`（自動）可隨時整個刪除重建，不影響精選庫。兩個檔案各自獨立的 dirty flag 確保未修改的檔案不被重複寫入。這個設計讓不同書的書級定義（CSV 的 `definition_en`）與全局精選定義（word-dict）之間有明確的層次，不相互污染。
+
+- **MW 預查 `definition_en` 欄位作為查找鏈的快取橋樑**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-08）：`definition_en` 是 CSV 層的 book-scope 覆寫機制。`--mw` 從三層快取填入此欄；使用者手動修改此欄是書級客製化（不影響全局快取）；`--update-dict` 是使用者主動將書級編輯升級為全局精選。`--deepl` 看到 `definition_en` 有值就直接使用，不再查 API，這也使 DeepL 重跑時無需重複 MW 查詢。
