@@ -27,6 +27,7 @@ import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv } from './csv/beginnerDeeplTranslator';
 import { getWordCache } from './nlp/wordCache';
+import { prefetchCefrToWordCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -62,6 +63,7 @@ program
   .option('--beginner-split <數量>', '將翻譯 CSV 分割為每 N 個詞彙一個檔案')
   .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
+  .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -83,8 +85,9 @@ program
     beginnerSplit?: string;
     mw?: boolean;
     updateDict?: boolean;
+    prefetchCefr?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.prefetchCefr;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -110,6 +113,7 @@ program
     if (options.mock)   console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
     if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
     if (options.updateDict) console.log(chalk.magenta('   [個人單字庫升級模式]'));
+    if (options.prefetchCefr) console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
     if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
     if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green('   [MW 預查 + DeepL 翻譯模式]'));
     if (options.deepl && !isCompare) console.log(chalk.blue('   [DeepL 翻譯模式]'));
@@ -117,6 +121,37 @@ program
     console.log(chalk.gray(`   牌組：${deckName}`));
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
     console.log('');
+
+    // CEFR 字庫 MW 預查：不需要輸入檔案，直接讀內建字庫
+    if (options.prefetchCefr) {
+      if (!process.env.MW_API_KEY) {
+        console.error(chalk.red('錯誤：--prefetch-cefr 需設定環境變數 MW_API_KEY'));
+        process.exit(1);
+      }
+      const wc = getWordCache();
+      console.log(chalk.cyan(`CEFR 字庫 MW 預查`));
+      console.log(chalk.gray(`快取路徑：${wc.cacheFilePath}`));
+      console.log(chalk.gray(`目前快取：${wc.cacheSize} 筆`));
+      console.log('');
+
+      const result = await prefetchCefrToWordCache((done, total, meta) => {
+        const pct = String(Math.round(done / total * 100)).padStart(3);
+        const sourceTag =
+          meta.source === 'MW'     ? chalk.green('[MW]')      :
+          meta.source === 'cached' ? chalk.blue('[快取]')     :
+          meta.source === 'dict'   ? chalk.magenta('[字典]')  :
+          meta.source === 'no-key' ? chalk.red('[無 KEY]')    :
+          meta.source === 'no-def' ? chalk.gray('[查無]')     :
+                                     chalk.red('[錯誤]');
+        process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
+      });
+
+      process.stdout.write('\n\n');
+      console.log(chalk.green(`✓ 完成：新查 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
+      console.log(chalk.gray(`快取總筆數：${getWordCache().cacheSize} 筆`));
+      console.log(chalk.gray(`快取路徑：${getWordCache().cacheFilePath}`));
+      return;
+    }
 
     const isDirectory = (() => { try { return fs.statSync(pdfFile).isDirectory(); } catch { return false; } })();
     const ext = path.extname(pdfFile).toLowerCase();
