@@ -1,15 +1,20 @@
 jest.mock('../../nlp/wordCache');
+jest.mock('../../cards/deeplTranslator');
 
 import { getWordCache } from '../../nlp/wordCache';
-import { prefetchCefrToWordCache } from '../../nlp/cefrPrefetcher';
+import { batchTranslate } from '../../cards/deeplTranslator';
+import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from '../../nlp/cefrPrefetcher';
 
 // ── 共用 mock ─────────────────────────────────────────────────────────────────
 
 const mockCache = {
-  get:      jest.fn(),
-  setCache: jest.fn(),
-  flush:    jest.fn(),
-  cacheSize: 0,
+  get:        jest.fn(),
+  getChinese: jest.fn(),
+  setCache:   jest.fn(),
+  setDict:    jest.fn(),
+  setChinese: jest.fn(),
+  flush:      jest.fn(),
+  cacheSize:  0,
 };
 
 const origMwKey  = process.env.MW_API_KEY;
@@ -18,10 +23,13 @@ const origFetch  = global.fetch;
 // 測試用詞列表（3 個詞，避免跑真實 5782 筆）
 const TEST_WORDS = ['run', 'bear', 'go'];
 
+const DEEPL_CONFIG = { apiKey: 'test-deepl-key' };
+
 beforeEach(() => {
   jest.clearAllMocks();
   (getWordCache as jest.Mock).mockReturnValue(mockCache);
-  mockCache.get.mockReturnValue(null); // 預設：cache miss
+  mockCache.get.mockReturnValue(null);        // 預設：英文 cache miss
+  mockCache.getChinese.mockReturnValue(null); // 預設：中文 cache miss
   delete process.env.MW_API_KEY;
   global.fetch = jest.fn();
 });
@@ -250,5 +258,123 @@ describe('prefetchCefrToWordCache — flush and counts', () => {
     expect(result.skippedCount).toBe(1);
     expect(result.fetchedCount).toBe(1);
     expect(result.failedCount).toBe(1);
+  });
+});
+
+// ── prefetchCefrZhToWordCache ─────────────────────────────────────────────────
+
+describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
+  it('should skip word and increment skippedCount when Chinese cache already has entry', async () => {
+    // Given
+    mockCache.getChinese.mockReturnValue('快速奔跑');
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(0);
+    expect(batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it('should report source=cached in progress callback for Chinese cache hit', async () => {
+    // Given
+    mockCache.getChinese.mockReturnValue('快速奔跑');
+    const sources: string[] = [];
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['run']);
+    // Then
+    expect(sources).toEqual(['cached']);
+  });
+});
+
+describe('prefetchCefrZhToWordCache — no English definition', () => {
+  it('should increment noEnCount and skip DeepL when no English definition in cache', async () => {
+    // Given: 中文 miss、英文也 miss
+    mockCache.getChinese.mockReturnValue(null);
+    mockCache.get.mockReturnValue(null);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(result.noEnCount).toBe(1);
+    expect(result.fetchedCount).toBe(0);
+    expect(batchTranslate).not.toHaveBeenCalled();
+  });
+});
+
+describe('prefetchCefrZhToWordCache — DeepL translation', () => {
+  it('should call batchTranslate with English definition for cache misses', async () => {
+    // Given
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(batchTranslate).toHaveBeenCalledWith(
+      expect.arrayContaining(['(verb) to sprint']),
+      DEEPL_CONFIG,
+    );
+  });
+
+  it('should store Chinese translation via setChinese with base (POS-agnostic) key', async () => {
+    // Given
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(mockCache.setChinese).toHaveBeenCalledWith('run', null, '快速奔跑');
+  });
+
+  it('should increment fetchedCount on successful translation', async () => {
+    // Given
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(result.fetchedCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+  });
+
+  it('should increment failedCount when batchTranslate throws', async () => {
+    // Given
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockRejectedValue(new Error('DeepL quota exceeded'));
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(result.failedCount).toBe(1);
+    expect(mockCache.setChinese).not.toHaveBeenCalled();
+  });
+});
+
+describe('prefetchCefrZhToWordCache — flush and counts', () => {
+  it('should call flush() exactly once after processing all words', async () => {
+    // Given
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑', '熊', '去']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then
+    expect(mockCache.flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return correct counts for mixed results', async () => {
+    // Given: run→中文快取命中, bear→翻譯成功, go→無英文定義
+    mockCache.getChinese
+      .mockReturnValueOnce('快速奔跑')  // run → cached
+      .mockReturnValueOnce(null)        // bear → miss
+      .mockReturnValueOnce(null);       // go → miss
+    mockCache.get
+      .mockReturnValueOnce({ def: '(noun) a large mammal', tier: 'cache' }) // bear → has en
+      .mockReturnValueOnce(null);                                            // go → no en
+    (batchTranslate as jest.Mock).mockResolvedValue(['熊']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then
+    expect(result.totalCount).toBe(3);
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(1);
+    expect(result.noEnCount).toBe(1);
+    expect(result.failedCount).toBe(0);
   });
 });

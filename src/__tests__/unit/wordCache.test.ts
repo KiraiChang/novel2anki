@@ -126,6 +126,58 @@ describe('WordCacheManager', () => {
     });
   });
 
+  // ── getChinese / setChinese ───────────────────────────────────────────────────
+
+  describe('getChinese', () => {
+    it('should return null when Chinese cache is empty', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      // When / Then
+      expect(wc.getChinese('run', 'verb')).toBeNull();
+    });
+
+    it('should return Chinese def on base key match', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', null, '快速奔跑');
+      // When / Then
+      expect(wc.getChinese('run', null)).toBe('快速奔跑');
+    });
+
+    it('should fall back from word:pos to word when exact key is absent', () => {
+      // Given: stored under base key only
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', null, '快速奔跑');
+      // When: query with POS
+      const result = wc.getChinese('run', 'verb');
+      // Then: falls back to base key
+      expect(result).toBe('快速奔跑');
+    });
+  });
+
+  describe('flush (Chinese cache)', () => {
+    it('should write word-cache-zh.json to disk after setChinese', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setChinese('run', null, '快速奔跑');
+      // When
+      wc.flush();
+      // Then
+      const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'word-cache-zh.json'), 'utf-8'));
+      expect(data['run']).toBe('快速奔跑');
+    });
+
+    it('should not create word-cache-zh.json when only English cache was changed', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setCache('run', 'verb', '(verb) to sprint', 'MW');
+      // When
+      wc.flush();
+      // Then
+      expect(fs.existsSync(path.join(tmpDir, 'word-cache-zh.json'))).toBe(false);
+    });
+  });
+
   // ── persistence ──────────────────────────────────────────────────────────────
 
   describe('persistence', () => {
@@ -142,6 +194,17 @@ describe('WordCacheManager', () => {
       // Then
       expect(wc2.get('abandon', 'verb')?.tier).toBe('dict');
       expect(wc2.get('run', 'verb')?.tier).toBe('cache');
+    });
+
+    it('should load Chinese cache from existing file on construction', () => {
+      // Given
+      const wc1 = new WordCacheManager(tmpDir);
+      wc1.setChinese('run', null, '快速奔跑');
+      wc1.flush();
+      // When
+      const wc2 = new WordCacheManager(tmpDir);
+      // Then
+      expect(wc2.getChinese('run', null)).toBe('快速奔跑');
     });
   });
 

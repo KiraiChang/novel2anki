@@ -27,7 +27,7 @@ import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv } from './csv/beginnerDeeplTranslator';
 import { getWordCache } from './nlp/wordCache';
-import { prefetchCefrToWordCache } from './nlp/cefrPrefetcher';
+import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
@@ -64,6 +64,7 @@ program
   .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
   .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
+  .option('--prefetch-cefr-zh', '批次將 word-cache.json 的英文定義翻成中文並存入 word-cache-zh.json（需設定 DEEPL_API_KEY；已翻譯的詞自動跳過）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -86,8 +87,9 @@ program
     mw?: boolean;
     updateDict?: boolean;
     prefetchCefr?: boolean;
+    prefetchCefrZh?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.prefetchCefr;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.prefetchCefr && !options.prefetchCefrZh;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -113,7 +115,8 @@ program
     if (options.mock)   console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
     if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
     if (options.updateDict) console.log(chalk.magenta('   [個人單字庫升級模式]'));
-    if (options.prefetchCefr) console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
+    if (options.prefetchCefr)   console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
+    if (options.prefetchCefrZh) console.log(chalk.blue('   [CEFR 字庫中文翻譯模式]'));
     if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
     if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green('   [MW 預查 + DeepL 翻譯模式]'));
     if (options.deepl && !isCompare) console.log(chalk.blue('   [DeepL 翻譯模式]'));
@@ -150,6 +153,40 @@ program
       console.log(chalk.green(`✓ 完成：新查 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
       console.log(chalk.gray(`快取總筆數：${getWordCache().cacheSize} 筆`));
       console.log(chalk.gray(`快取路徑：${getWordCache().cacheFilePath}`));
+      return;
+    }
+
+    // CEFR 字庫中文批次翻譯
+    if (options.prefetchCefrZh) {
+      let deeplCfg;
+      try { deeplCfg = loadDeepLConfig(); } catch {
+        console.error(chalk.red('錯誤：--prefetch-cefr-zh 需設定環境變數 DEEPL_API_KEY'));
+        process.exit(1);
+      }
+      const wc = getWordCache();
+      console.log(chalk.cyan(`CEFR 字庫中文翻譯`));
+      console.log(chalk.gray(`英文快取：${wc.cacheSize} 筆 | 中文快取：${wc.cacheZhSize} 筆`));
+      console.log(chalk.gray(`中文快取路徑：${wc.cacheZhFilePath}`));
+      if (wc.cacheSize === 0) {
+        console.log(chalk.yellow('⚠ 尚無英文定義快取，請先執行 --prefetch-cefr 建立英文定義後再翻譯。'));
+        process.exit(1);
+      }
+      console.log('');
+
+      const result = await prefetchCefrZhToWordCache(deeplCfg, (done, total, meta) => {
+        const pct = String(Math.round(done / total * 100)).padStart(3);
+        const sourceTag =
+          meta.source === 'deepl'  ? chalk.blue('[DeepL]') :
+          meta.source === 'cached' ? chalk.green('[快取]') :
+          meta.source === 'no-en'  ? chalk.gray('[無英文]') :
+                                     chalk.red('[錯誤]');
+        process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
+      });
+
+      process.stdout.write('\n\n');
+      console.log(chalk.green(`✓ 完成：新翻 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 無英文定義 ${result.noEnCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
+      console.log(chalk.gray(`中文快取總筆數：${getWordCache().cacheZhSize} 筆`));
+      console.log(chalk.gray(`中文快取路徑：${getWordCache().cacheZhFilePath}`));
       return;
     }
 

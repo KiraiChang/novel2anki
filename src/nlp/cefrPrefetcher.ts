@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWordCache } from './wordCache';
+import { batchTranslate, DeepLConfig } from '../cards/deeplTranslator';
 
 const CEFR_PATH = path.join(__dirname, '../data/cefr-wordlist.json');
 const MW_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
@@ -117,4 +118,90 @@ export async function prefetchCefrToWordCache(
 
   wc.flush();
   return { totalCount: cefrWords.length, fetchedCount, skippedCount, failedCount };
+}
+
+// ── CEFR 字庫中文批次預查 ─────────────────────────────────────────────────────
+
+export interface PrefetchZhProgress {
+  word: string;
+  source: 'cached' | 'deepl' | 'no-en' | 'error';
+}
+
+export interface PrefetchZhResult {
+  totalCount:   number;
+  fetchedCount: number;
+  skippedCount: number;
+  noEnCount:    number;
+  failedCount:  number;
+}
+
+const DEEPL_BATCH = 50;
+
+/**
+ * 批次預查 CEFR 字庫的 DeepL 中文定義，結果存入 word-cache-zh.json。
+ * 已有中文快取的詞自動跳過，可中斷後重跑。
+ * 需先執行 --prefetch-cefr 建立英文定義快取。
+ * @param deeplConfig DeepL API 設定
+ * @param onProgress 進度回呼
+ * @param _words 覆寫詞列表（測試用）
+ */
+export async function prefetchCefrZhToWordCache(
+  deeplConfig: DeepLConfig,
+  onProgress?: (done: number, total: number, meta: PrefetchZhProgress) => void,
+  _words?: string[],
+): Promise<PrefetchZhResult> {
+  const cefrWords = _words ?? Object.keys(
+    JSON.parse(fs.readFileSync(CEFR_PATH, 'utf-8')) as Record<string, string>,
+  );
+
+  const wc = getWordCache();
+  let fetchedCount = 0;
+  let skippedCount = 0;
+  let noEnCount    = 0;
+  let failedCount  = 0;
+
+  // 收集需要翻譯的詞與對應英文定義
+  const pending: Array<{ word: string; enDef: string; idx: number }> = [];
+
+  for (let i = 0; i < cefrWords.length; i++) {
+    const word = cefrWords[i];
+
+    if (wc.getChinese(word, null) !== null) {
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
+      continue;
+    }
+
+    const enHit = wc.get(word, null);
+    if (!enHit) {
+      noEnCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'no-en' });
+      continue;
+    }
+
+    pending.push({ word, enDef: enHit.def, idx: i });
+  }
+
+  // 分批翻譯
+  for (let b = 0; b < pending.length; b += DEEPL_BATCH) {
+    const chunk = pending.slice(b, b + DEEPL_BATCH);
+    try {
+      const translated = await batchTranslate(chunk.map(c => c.enDef), deeplConfig);
+      for (let j = 0; j < chunk.length; j++) {
+        const { word, idx } = chunk[j];
+        const zh = translated[j] ?? '';
+        wc.setChinese(word, null, zh);
+        fetchedCount++;
+        onProgress?.(idx + 1, cefrWords.length, { word, source: 'deepl' });
+      }
+    } catch {
+      for (const { word, idx } of chunk) {
+        failedCount++;
+        onProgress?.(idx + 1, cefrWords.length, { word, source: 'error' });
+      }
+    }
+  }
+
+  wc.flush();
+  return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount };
 }
