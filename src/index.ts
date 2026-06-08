@@ -111,16 +111,17 @@ program
     // 比對模式：--deepl + Claude API 或 --deepl + --offline
     const isCompare = options.deepl && (options.offline || (!options.mock && process.env.ANTHROPIC_API_KEY));
 
+    const providerLabel = (process.env['TRANSLATE_PROVIDER'] ?? 'DeepL').toUpperCase();
     console.log(chalk.cyan(`\n📖 PDF 小說 → Anki 字卡產生器`));
     if (options.mock)   console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
     if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
     if (options.updateDict) console.log(chalk.magenta('   [個人單字庫升級模式]'));
     if (options.prefetchCefr)   console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
-    if (options.prefetchCefrZh) console.log(chalk.blue('   [CEFR 字庫中文翻譯模式]'));
+    if (options.prefetchCefrZh) console.log(chalk.blue(`   [CEFR 字庫中文翻譯模式：${providerLabel}]`));
     if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
-    if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green('   [MW 預查 + DeepL 翻譯模式]'));
-    if (options.deepl && !isCompare) console.log(chalk.blue('   [DeepL 翻譯模式]'));
-    if (isCompare) console.log(chalk.blue(`   [DeepL 比對模式：DeepL vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
+    if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green(`   [MW 預查 + ${providerLabel} 翻譯模式]`));
+    if (options.deepl && !isCompare) console.log(chalk.blue(`   [${providerLabel} 翻譯模式]`));
+    if (isCompare) console.log(chalk.blue(`   [${providerLabel} 比對模式：${providerLabel} vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
     console.log('');
@@ -159,8 +160,8 @@ program
     // CEFR 字庫中文批次翻譯
     if (options.prefetchCefrZh) {
       let deeplCfg;
-      try { deeplCfg = loadDeepLConfig(); } catch {
-        console.error(chalk.red('錯誤：--prefetch-cefr-zh 需設定環境變數 DEEPL_API_KEY'));
+      try { deeplCfg = loadDeepLConfig(); } catch (e) {
+        console.error(chalk.red(`錯誤：--prefetch-cefr-zh 無法載入翻譯設定：${(e as Error).message}`));
         process.exit(1);
       }
       const wc = getWordCache();
@@ -176,7 +177,7 @@ program
       const result = await prefetchCefrZhToWordCache(deeplCfg, (done, total, meta) => {
         const pct = String(Math.round(done / total * 100)).padStart(3);
         const sourceTag =
-          meta.source === 'deepl'  ? chalk.blue('[DeepL]') :
+          meta.source === 'deepl'  ? chalk.blue(`[${providerLabel}]`) :
           meta.source === 'cached' ? chalk.green('[快取]') :
           meta.source === 'no-en'  ? chalk.gray('[無英文]') :
                                      chalk.red('[錯誤]');

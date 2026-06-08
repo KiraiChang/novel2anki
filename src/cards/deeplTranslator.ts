@@ -1,24 +1,11 @@
-import * as deepl from 'deepl-node';
+// 薄包裝層，維持既有 import 路徑相容性。
+// 實際邏輯移至 translator.ts，支援 deepl / google / azure / claude 後端切換。
+import { TranslatorConfig, loadTranslatorConfig, batchTranslate, translateToZh } from './translator';
 
-export interface DeepLConfig {
-  apiKey: string;
-}
+export type DeepLConfig = TranslatorConfig;
+export { TranslatorConfig, loadTranslatorConfig, batchTranslate, translateToZh };
 
+/** @deprecated 請改用 loadTranslatorConfig()。讀取 TRANSLATE_PROVIDER 決定後端 */
 export function loadDeepLConfig(): DeepLConfig {
-  const apiKey = process.env.DEEPL_API_KEY;
-  if (!apiKey) throw new Error('未設定 DEEPL_API_KEY 環境變數，請在 .env 加入 DEEPL_API_KEY=your-key');
-  return { apiKey };
-}
-
-export async function translateToZh(text: string, config: DeepLConfig): Promise<string> {
-  const translator = new deepl.Translator(config.apiKey);
-  const result = await translator.translateText(text, null, 'zh-HANT');
-  return result.text;
-}
-
-export async function batchTranslate(texts: string[], config: DeepLConfig): Promise<string[]> {
-  if (texts.length === 0) return [];
-  const translator = new deepl.Translator(config.apiKey);
-  const results = await translator.translateText(texts, null, 'zh-HANT');
-  return (Array.isArray(results) ? results : [results]).map(r => r.text);
+  return loadTranslatorConfig();
 }

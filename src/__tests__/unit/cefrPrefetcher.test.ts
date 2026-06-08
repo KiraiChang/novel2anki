@@ -23,7 +23,7 @@ const origFetch  = global.fetch;
 // 測試用詞列表（3 個詞，避免跑真實 5782 筆）
 const TEST_WORDS = ['run', 'bear', 'go'];
 
-const DEEPL_CONFIG = { apiKey: 'test-deepl-key' };
+const DEEPL_CONFIG = { provider: 'deepl' as const, apiKey: 'test-deepl-key' };
 
 beforeEach(() => {
   jest.clearAllMocks();
