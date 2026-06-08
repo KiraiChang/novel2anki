@@ -12,6 +12,9 @@
 - [x] **CEFR 詞表升級至 Oxford 5000**（`src/data/cefr-wordlist.json`、`scripts/process-oxford.py`，2026-06-07）：原 853 詞 AWL 詞表 UNKNOWN 率 86%，已整合 Oxford 5000（4954 詞）+ 奇幻/敘事補充詞（778 詞），共 5732 詞。UNKNOWN 率降至 37.8%（《The Demon Awakens》），剩餘 UNKNOWN 以奇幻發明詞（centaur, dactyl, powrie）為主，無法分配標準 CEFR 等級。同步修復停用詞表（代名詞遺漏）及 cefrLookup 後綴剝離邏輯（24 條規則）。
 - [x] **MW 預查旗標 `--mw`**（`src/csv/beginnerDeeplTranslator.ts`、`src/index.ts`，2026-06-08）：新增 `--mw` CLI 旗標，可單獨預查英文定義並寫入 CSV 的 `definition_en` 欄（DeepL 額度用完時先行備妥），亦可與 `--deepl` 組合一次完成。`--deepl` 運行時若 `definition_en` 已填則直接使用，跳過 MW API 呼叫。進度顯示新增 `[字典]`（精選）/ `[快取]`（自動）標記。
 - [x] **三層個人單字庫**（`src/nlp/wordCache.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-08）：新增 `WordCacheManager`（`~/.novel2anki/word-dict.json` + `word-cache.json`），查找順序：word-dict（使用者精選）→ word-cache（MW 自動快取）→ MW API。key 格式 `word:pos`，不同書的同詞不互相污染。`--update-dict` 旗標可將 CSV 已編輯的 `definition_en` 升級到 word-dict，未來所有書優先使用。髒資料延遲寫盤（dirty flag），避免每詞一次磁碟 I/O。
+- [x] **CEFR 字庫 MW 批次預查 `--prefetch-cefr`**（`src/nlp/cefrPrefetcher.ts`、`src/index.ts`，2026-06-08）：對 CEFR 字庫 5782 個詞批次預查 MW 英文定義，所有 POS 變體分別存入 `word-cache.json`；已快取的詞自動跳過，可中斷後重跑。MW 1000 req/day 限制下每天一次持續執行，約 6 天建完。
+- [x] **CEFR 字庫中文批次翻譯 `--prefetch-cefr-zh`**（`src/nlp/cefrPrefetcher.ts`、`src/index.ts`，2026-06-08）：對 `word-cache.json` 中的英文定義批次翻譯為繁體中文，存入 `word-cache-zh.json`；已翻譯的詞自動跳過。5782 詞 × 平均 40 字元 ≈ 23 萬字元，在 DeepL/Azure 免費額度一次跑完。需先執行 `--prefetch-cefr`。
+- [x] **翻譯後端多路切換**（`src/cards/translator.ts`，2026-06-08）：新增 `TranslatorConfig`（`provider` + `apiKey` + `region?`）統一介面，支援 DeepL / Google Translate / Azure Translator / Claude Haiku 四個後端。以 `TRANSLATE_PROVIDER` env var 切換（預設 `deepl`），`deeplTranslator.ts` 改為薄包裝層，既有呼叫者零修改。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併

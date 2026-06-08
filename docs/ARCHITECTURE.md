@@ -207,8 +207,10 @@ beginnerExporter.ts
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
 | NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫）、`protectNames()` / `restoreNames()`（`__PERSON_N__` 佔位符）、`saveNamesFile()` / `loadNamesFile()`（純文字 I/O） |
-| DeepL 翻譯 | `src/csv/beginnerDeeplTranslator.ts` | MW 預查 + DeepL 三階段翻譯管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次 DeepL（`zh-HANT`，`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫） |
-| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：三層查找快取（word-dict.json 精選 / word-cache.json 自動）；`get(word, pos)` 回傳 `{ def, tier }` 或 null；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton，整個 session 共用。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫）；key 格式 `word:pos`，無 POS 時用 `word` |
+| 翻譯管線 | `src/csv/beginnerDeeplTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫） |
+| 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku）；`deeplTranslator.ts` 為薄包裝層，保持既有 import 路徑相容性 |
+| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理 word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）三個快取；`get(word, pos)` / `getChinese(word, pos)` 各自採 `word:pos` → `word` fallback；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫） |
+| CEFR 預查器 | `src/nlp/cefrPrefetcher.ts` | `prefetchCefrToWordCache()`：對 CEFR 字庫 5782 詞批次預查 MW，所有 POS 變體分別存入 `word-cache.json`，已快取詞自動跳過可重跑。`prefetchCefrZhToWordCache(config)`：讀取 `word-cache.json` 英文定義，批次翻譯後存入 `word-cache-zh.json`，同樣可中斷重跑 |
 
 ## 核心型別
 
@@ -280,7 +282,7 @@ interface BeginnerWordStats {
 | `commander` | CLI 參數解析 |
 | `chalk` | 終端彩色輸出 |
 | `dotenv` | 載入 `.env` 環境變數 |
-| `deepl-node` | DeepL 官方 SDK，`--deepl` / `--deepl-force` 模式批次翻譯（目標語言 `zh-HANT`） |
-| `fetch()` | Node 18+ 內建，呼叫 Ollama REST API、Merriam-Webster API、Free Dictionary API（不引入新套件） |
+| `deepl-node` | DeepL 官方 SDK，`TRANSLATE_PROVIDER=deepl` 時使用（目標語言 `zh-HANT`） |
+| `fetch()` | Node 18+ 內建，呼叫 Ollama / MW / Free Dictionary / Google Translate / Azure Translator REST API（不引入新套件） |
 | `compromise` | 純 JS NLP，tokenize / POS tagging（全句上下文，提供 verbs/nouns/adjectives 詞性標記） |
 | `wink-lemmatizer` | 英文詞形還原，補強 compromise 不處理的形容詞比較級/最高級（faster→fast、best→good、worst→bad） |

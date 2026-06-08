@@ -110,7 +110,8 @@ export async function prefetchCefrToWordCache(
 
       fetchedCount++;
       onProgress?.(i + 1, cefrWords.length, { word, source: 'MW' });
-    } catch {
+    } catch (e) {
+      process.stderr.write(`\n[prefetch-cefr] "${word}" 錯誤：${(e as Error).message}\n`);
       failedCount++;
       onProgress?.(i + 1, cefrWords.length, { word, source: 'error' });
     }
@@ -194,7 +195,8 @@ export async function prefetchCefrZhToWordCache(
         fetchedCount++;
         onProgress?.(idx + 1, cefrWords.length, { word, source: 'deepl' });
       }
-    } catch {
+    } catch (e) {
+      process.stderr.write(`\n[prefetch-cefr-zh] 批次翻譯錯誤：${(e as Error).message}\n`);
       for (const { word, idx } of chunk) {
         failedCount++;
         onProgress?.(idx + 1, cefrWords.length, { word, source: 'error' });

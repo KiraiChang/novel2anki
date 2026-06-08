@@ -60,3 +60,7 @@
 - **三層快取設計的邊界清晰度**（`src/nlp/wordCache.ts`）：`word-dict.json`（精選）永遠不被程式自動覆寫，只有 `--update-dict` 時由使用者明確升級；`word-cache.json`（自動）可隨時整個刪除重建，不影響精選庫。兩個檔案各自獨立的 dirty flag 確保未修改的檔案不被重複寫入。這個設計讓不同書的書級定義（CSV 的 `definition_en`）與全局精選定義（word-dict）之間有明確的層次，不相互污染。
 
 - **MW 預查 `definition_en` 欄位作為查找鏈的快取橋樑**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-08）：`definition_en` 是 CSV 層的 book-scope 覆寫機制。`--mw` 從三層快取填入此欄；使用者手動修改此欄是書級客製化（不影響全局快取）；`--update-dict` 是使用者主動將書級編輯升級為全局精選。`--deepl` 看到 `definition_en` 有值就直接使用，不再查 API，這也使 DeepL 重跑時無需重複 MW 查詢。
+
+- **中文快取 `word-cache-zh.json` 獨立分離，不與英文快取混用**（`src/nlp/wordCache.ts`，2026-06-08）：中文快取採純字串 `Record<string, string>`，key 格式同英文（`word:pos` / `word`），查找 fallback 邏輯相同。分離的原因：英文定義快取（`word-cache.json`）記錄來源（`source: 'MW' | 'free'`），中文翻譯不需要此元資料，分離可保持各自檔案易讀、易手動編輯，也允許獨立清空重建某一語言的快取而不影響另一個。
+
+- **翻譯後端切換透過薄包裝層實現，既有呼叫者零修改**（`src/cards/translator.ts`，2026-06-08）：多後端邏輯集中於 `translator.ts`；`deeplTranslator.ts` 改為 re-export 包裝，`loadDeepLConfig()` 委派給 `loadTranslatorConfig()`，`batchTranslate()` 委派給 `translator.batchTranslate()`。這樣 `beginnerDeeplTranslator.ts`、`cefrPrefetcher.ts`、所有現有測試一行不動，新後端只需在 `.env` 設定 `TRANSLATE_PROVIDER` 即可生效。Google 和 Azure 後端使用 Node 18+ 內建 `fetch()`（不引入新 npm 套件），Claude 後端複用已有的 `@anthropic-ai/sdk`。

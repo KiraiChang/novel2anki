@@ -112,7 +112,11 @@ async function batchAzure(texts: string[], config: TranslatorConfig): Promise<st
       signal: AbortSignal.timeout(10000),
     },
   );
-  if (!res.ok) throw new Error(`Azure Translator HTTP ${res.status}`);
+  if (!res.ok) {
+    let detail = '';
+    try { const body = await res.json() as { error?: { message?: string } }; detail = body?.error?.message ?? ''; } catch { /* ignore */ }
+    throw new Error(`Azure Translator HTTP ${res.status}${detail ? `：${detail}` : ''}`);
+  }
   const data = await res.json() as AzureResponseItem[];
   return data.map(item => item.translations[0]?.text ?? '');
 }

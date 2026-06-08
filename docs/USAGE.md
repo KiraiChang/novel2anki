@@ -46,6 +46,10 @@ npx ts-node src/index.ts <輸入> [選項]
   --beginner-min-freq <N> 詞彙最低出現次數（預設：2）
   --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
   --beginner-split <N>    將翻譯 CSV 分割為每 N 個詞彙一個檔案（搭配 --beginner）
+  --mw                    MW 預查：預先查詢英文定義寫入 CSV 的 definition_en 欄（需設定 MW_API_KEY）
+  --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
+  --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
+  --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
 ```
 
 ## 使用範例
@@ -315,11 +319,11 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | 檔案 | 欄位數 | 用途 |
 |------|:---:|------|
 | `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
-| `*-beginner-words.csv` | 8 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
-| `*-beginner-words-part-NN.csv` | 8 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
+| `*-beginner-words.csv` | 9 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
+| `*-beginner-words-part-NN.csv` | 9 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
 | `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--deepl` 自動讀取 |
 
-**words CSV 欄位**（8 欄）：
+**words CSV 欄位**（9 欄）：
 
 | 欄位 | 說明 |
 |------|------|
@@ -330,6 +334,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `global_frequency` | 全書出現次數 |
 | `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
 | `context_sentence_zh` | 例句中文翻譯（留空，可選填，字卡背面輔助理解） |
+| `definition_en` | 英文定義（`--mw` 自動填入；可手動編輯作書級客製化；`--update-dict` 升級至全域字典） |
 | `definition_zh` | 繁體中文定義（留空，待翻譯） |
 
 ### 覆蓋率報告範例
@@ -362,6 +367,60 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `not-hapax` | 全書出現次數 < `--beginner-min-freq`（預設 2） |
 | `content-pos` | 非內容詞（代名詞、介系詞等） |
 | `proper-noun` | 在句子中間出現時大寫比例 > 70%（人名、地名等專有名詞） |
+
+## 翻譯後端切換
+
+`--deepl` 和 `--prefetch-cefr-zh` 都透過統一的翻譯層送出請求，可用 `TRANSLATE_PROVIDER` 環境變數切換後端，不需修改任何 CLI 指令。
+
+```bash
+# .env 設定（選一種）
+TRANSLATE_PROVIDER=deepl     # DeepL（預設）— DEEPL_API_KEY 必填
+TRANSLATE_PROVIDER=google    # Google Translate — GOOGLE_TRANSLATE_API_KEY 必填
+TRANSLATE_PROVIDER=azure     # Azure Translator — AZURE_TRANSLATOR_KEY 必填（AZURE_TRANSLATOR_REGION 選填）
+TRANSLATE_PROVIDER=claude    # Claude Haiku — ANTHROPIC_API_KEY 必填（複用現有 key）
+```
+
+| 後端 | 免費額度 | 備註 |
+|------|---------|------|
+| DeepL | 500,000 字/月 | 品質最佳；需獨立申請 |
+| Google Translate | 500,000 字/月 | 需啟用 Google Cloud Translation API |
+| Azure Translator | 2,000,000 字/月 | 免費額度最高；需建立 Azure 認知服務資源 |
+| Claude Haiku | 依 token 計費 | 無免費額度，但與現有 Anthropic key 共用 |
+
+## CEFR 字庫預查工作流程
+
+CEFR 字庫（5,782 詞）的 MW 英文定義與繁體中文翻譯可分兩步批次建立，建完後 `--deepl` 翻譯時直接從快取讀取，不再查 API。
+
+### Step 1：批次預查 MW 英文定義（`--prefetch-cefr`）
+
+```bash
+# 需設定 MW_API_KEY（1000 req/day 免費，約 6 天建完 5782 詞）
+npx ts-node src/index.ts --prefetch-cefr
+# 輸出：~/.novel2anki/word-cache.json（每次執行自動跳過已快取詞，可中斷重跑）
+```
+
+已快取的詞下次自動跳過，可每天定時執行直到建完。
+
+### Step 2：批次翻譯為繁體中文（`--prefetch-cefr-zh`）
+
+```bash
+# 需先完成 Step 1；依設定的 TRANSLATE_PROVIDER 送翻譯請求
+npx ts-node src/index.ts --prefetch-cefr-zh
+# 輸出：~/.novel2anki/word-cache-zh.json（已翻譯的詞自動跳過）
+
+# 或指定後端（覆寫 .env 設定）
+TRANSLATE_PROVIDER=azure npx ts-node src/index.ts --prefetch-cefr-zh
+```
+
+Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬字元，一次可跑完。
+
+### 快取檔位置
+
+| 檔案 | 內容 | 建立方式 |
+|------|------|---------|
+| `~/.novel2anki/word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
+| `~/.novel2anki/word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
+| `~/.novel2anki/word-cache-zh.json` | 翻譯後的繁體中文定義 | `--prefetch-cefr-zh` |
 
 ## 匯入 Anki
 
