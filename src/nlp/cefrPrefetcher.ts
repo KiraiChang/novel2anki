@@ -13,7 +13,9 @@ interface MWEntry {
 }
 
 const isUsable = (def: string) =>
-  def.length >= 10 && !/^(see|compare|synonym of)/i.test(def.trim());
+  def.length >= 10 &&
+  !/^(see|compare|synonym of)/i.test(def.trim()) &&
+  !/(:\s*(such as)?\s*)$/.test(def.trim());
 
 export interface PrefetchProgress {
   word: string;
