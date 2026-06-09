@@ -64,3 +64,9 @@
 - **中文快取 `word-cache-zh.json` 獨立分離，不與英文快取混用**（`src/nlp/wordCache.ts`，2026-06-08）：中文快取採純字串 `Record<string, string>`，key 格式同英文（`word:pos` / `word`），查找 fallback 邏輯相同。分離的原因：英文定義快取（`word-cache.json`）記錄來源（`source: 'MW' | 'free'`），中文翻譯不需要此元資料，分離可保持各自檔案易讀、易手動編輯，也允許獨立清空重建某一語言的快取而不影響另一個。
 
 - **翻譯後端切換透過薄包裝層實現，既有呼叫者零修改**（`src/cards/translator.ts`，2026-06-08）：多後端邏輯集中於 `translator.ts`；`deeplTranslator.ts` 改為 re-export 包裝，`loadDeepLConfig()` 委派給 `loadTranslatorConfig()`，`batchTranslate()` 委派給 `translator.batchTranslate()`。這樣 `beginnerDeeplTranslator.ts`、`cefrPrefetcher.ts`、所有現有測試一行不動，新後端只需在 `.env` 設定 `TRANSLATE_PROVIDER` 即可生效。Google 和 Azure 後端使用 Node 18+ 內建 `fetch()`（不引入新 npm 套件），Claude 後端複用已有的 `@anthropic-ai/sdk`。
+
+- **例句快取採 FNV-1a 32-bit hash 為 key，不用原文字串**（`src/nlp/wordCache.ts`，2026-06-09）：key 若使用例句原文，JSON 中每筆 key 可達 80–150 字元，大量記錄時快取檔可觀。改用 FNV-1a 32-bit（`h ^= charCode; h = Math.imul(h, 0x01000193) >>> 0`）得到 8 字元 hex，快取檔可讀、效能最佳。32-bit 的碰撞空間為 2³² ≈ 43 億，對於數萬筆例句碰撞機率可忽略（生日攻擊門檻 ≈ 65,536 筆才達 1‰）；value 中保留 `en` 原文，碰撞時可人工比對。
+
+- **`sentence-cache.json` 與 `word-cache-zh.json` 獨立分離，不合併入同一檔案**（`src/nlp/wordCache.ts`，2026-06-09）：例句快取的 key 為 hash、value 含 `en`/`zh` 兩欄，與詞義快取（key=lemma:pos、value=翻譯字串）結構完全不同。分離可讓使用者獨立清空某一類快取、易於手動查閱，也使兩個 dirty flag 互不干擾。
+
+- **`fillVocabTranslationsFromCache` 統一呼叫點，不分散在各生成器**（`src/cards/translationFiller.ts`，2026-06-09）：`index.ts` 有 4 個獨立的輸出路徑（beginner words CSV 匯入、beginner tokens CSV 匯入、general CSV 匯入、主 PDF/EPUB 流程），每條路徑在輸出前各自呼叫 `fillVocabTranslationsFromCache`。若改在各生成器內部補填，新增生成器時容易遺漏；集中在輸出前作為後處理步驟，職責單純且易驗證。

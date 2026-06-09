@@ -50,6 +50,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
   --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
+  --fill-sent-zh          雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填
 ```
 
 ## 使用範例
@@ -421,6 +422,25 @@ Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬�
 | `~/.novel2anki/word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
 | `~/.novel2anki/word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
 | `~/.novel2anki/word-cache-zh.json` | 翻譯後的繁體中文定義 | `--prefetch-cefr-zh` |
+| `~/.novel2anki/sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--deepl` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
+
+## 例句翻譯快取（`--fill-sent-zh`）
+
+`--deepl` 翻譯結束後，每筆例句翻譯會自動存入 `sentence-cache.json`（以例句 FNV-1a hash 為 key）。  
+若之後有新的 beginner words CSV 尚未翻譯例句，可用 `--fill-sent-zh` 從快取補填，不需再呼叫翻譯 API：
+
+```bash
+# 單一 CSV 補填 + 同步
+npx ts-node src/index.ts output/novel-beginner-words.csv --fill-sent-zh
+
+# 整目錄批次補填
+npx ts-node src/index.ts output/ --fill-sent-zh
+```
+
+執行後輸出三類統計：
+- **存入快取**：CSV 中已有 `context_sentence_zh` 的列，翻譯寫入 `sentence-cache.json`
+- **補填 CSV**：CSV 中原本空白、快取命中的列，填入翻譯並更新 CSV 檔案
+- **略過**：例句為空，或快取中找不到對應翻譯的列
 
 ## 匯入 Anki
 

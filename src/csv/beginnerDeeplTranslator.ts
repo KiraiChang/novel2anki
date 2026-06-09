@@ -511,3 +511,84 @@ export async function updateWordDictFromCsv(
   cache.flush();
   return { updatedCount, skippedCount };
 }
+
+// ── 例句快取雙向同步 ───────────────────────────────────────────────────────────
+
+export interface SyncSentenceResult {
+  savedToCache:    number;  // CSV → sentence-cache（非空例句翻譯存入快取）
+  filledFromCache: number;  // sentence-cache → CSV（空例句翻譯從快取補填）
+  noMatch:         number;  // 空且快取也找不到
+  outputPath:      string;
+}
+
+/**
+ * 雙向同步例句翻譯：
+ * - context_sentence_zh 不為空 → 寫入 sentence-cache.json
+ * - context_sentence_zh 為空   → 從 sentence-cache.json 補填
+ * 若有任何 CSV 更新，自動寫回檔案。
+ */
+export function syncSentenceCacheWithCsv(
+  csvPath: string,
+  onProgress?: (current: number, total: number, action: 'saved' | 'filled' | 'skip') => void,
+): SyncSentenceResult {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) {
+    return { savedToCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
+  }
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+
+  const sentEnColIdx  = idx['context_sentence'];
+  const sentZhColIdx  = idx['context_sentence_zh'];
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  if (sentEnColIdx === undefined) {
+    return { savedToCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
+  }
+
+  const wc = getWordCache();
+  let savedToCache    = 0;
+  let filledFromCache = 0;
+  let noMatch         = 0;
+  let csvDirty        = false;
+
+  for (let i = 0; i < rows.length; i++) {
+    const enSent = get(rows[i], 'context_sentence').trim();
+    const zhSent = sentZhColIdx !== undefined ? get(rows[i], 'context_sentence_zh').trim() : '';
+
+    if (zhSent) {
+      // CSV → cache：已有翻譯，存入快取
+      wc.setSentenceZh(enSent, zhSent);
+      savedToCache++;
+      onProgress?.(i + 1, rows.length, 'saved');
+    } else if (enSent) {
+      // cache → CSV：嘗試從快取補填
+      const cached = wc.getSentenceZh(enSent);
+      if (cached && sentZhColIdx !== undefined) {
+        while (rows[i].length <= sentZhColIdx) rows[i].push('');
+        rows[i][sentZhColIdx] = cached;
+        filledFromCache++;
+        csvDirty = true;
+        onProgress?.(i + 1, rows.length, 'filled');
+      } else {
+        noMatch++;
+        onProgress?.(i + 1, rows.length, 'skip');
+      }
+    } else {
+      noMatch++;
+      onProgress?.(i + 1, rows.length, 'skip');
+    }
+  }
+
+  if (csvDirty) {
+    const headerLine = headers.map(escapeField).join(',');
+    const dataLines  = rows.map(cols => cols.map(escapeField).join(','));
+    fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+  }
+
+  wc.flush();
+  return { savedToCache, filledFromCache, noMatch, outputPath: csvPath };
+}

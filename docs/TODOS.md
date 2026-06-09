@@ -15,6 +15,9 @@
 - [x] **CEFR 字庫 MW 批次預查 `--prefetch-cefr`**（`src/nlp/cefrPrefetcher.ts`、`src/index.ts`，2026-06-08）：對 CEFR 字庫 5782 個詞批次預查 MW 英文定義，所有 POS 變體分別存入 `word-cache.json`；已快取的詞自動跳過，可中斷後重跑。MW 1000 req/day 限制下每天一次持續執行，約 6 天建完。
 - [x] **CEFR 字庫中文批次翻譯 `--prefetch-cefr-zh`**（`src/nlp/cefrPrefetcher.ts`、`src/index.ts`，2026-06-08）：對 `word-cache.json` 中的英文定義批次翻譯為繁體中文，存入 `word-cache-zh.json`；已翻譯的詞自動跳過。5782 詞 × 平均 40 字元 ≈ 23 萬字元，在 DeepL/Azure 免費額度一次跑完。需先執行 `--prefetch-cefr`。
 - [x] **翻譯後端多路切換**（`src/cards/translator.ts`，2026-06-08）：新增 `TranslatorConfig`（`provider` + `apiKey` + `region?`）統一介面，支援 DeepL / Google Translate / Azure Translator / Claude Haiku 四個後端。以 `TRANSLATE_PROVIDER` env var 切換（預設 `deepl`），`deeplTranslator.ts` 改為薄包裝層，既有呼叫者零修改。
+- [x] **輸出前補填快取翻譯 `fillVocabTranslationsFromCache`**（`src/cards/translationFiller.ts`，2026-06-09）：新增 `fillVocabTranslationsFromCache(cards)`，在每個字卡輸出路徑執行前補填 `definition_zh`（查 `word-cache-zh.json`）與 `exampleZh`（查 `sentence-cache.json`）；已有內容不覆寫，快取未命中保持空白。4 個輸出路徑（beginner words、beginner tokens、CSV import、主流程）均已接入。
+- [x] **例句翻譯快取 `sentence-cache.json`**（`src/nlp/wordCache.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：新增 `sentence-cache.json`（`~/.novel2anki/`），以例句英文的 FNV-1a 32-bit hash（8 位 hex）為 key，存 `{ en, zh }`。`translateBeginnerWordsCsv` Phase 3 翻譯後自動存入；`WordCacheManager` 新增 `getSentenceZh` / `setSentenceZh` / `sentenceCacheSize` / `sentenceCacheFilePath`。
+- [x] **`--fill-sent-zh` 雙向同步 CLI**（`src/index.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：新增 `--fill-sent-zh` 旗標，對 beginner words CSV 執行 `syncSentenceCacheWithCsv`：非空 `context_sentence_zh` 存入 sentence-cache；空白列從快取補填；僅有填入時才重寫 CSV。不需 API key。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併
