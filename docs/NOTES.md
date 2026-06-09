@@ -69,4 +69,6 @@
 
 - **`sentence-cache.json` 與 `word-cache-zh.json` 獨立分離，不合併入同一檔案**（`src/nlp/wordCache.ts`，2026-06-09）：例句快取的 key 為 hash、value 含 `en`/`zh` 兩欄，與詞義快取（key=lemma:pos、value=翻譯字串）結構完全不同。分離可讓使用者獨立清空某一類快取、易於手動查閱，也使兩個 dirty flag 互不干擾。
 
-- **`fillVocabTranslationsFromCache` 統一呼叫點，不分散在各生成器**（`src/cards/translationFiller.ts`，2026-06-09）：`index.ts` 有 4 個獨立的輸出路徑（beginner words CSV 匯入、beginner tokens CSV 匯入、general CSV 匯入、主 PDF/EPUB 流程），每條路徑在輸出前各自呼叫 `fillVocabTranslationsFromCache`。若改在各生成器內部補填，新增生成器時容易遺漏；集中在輸出前作為後處理步驟，職責單純且易驗證。
+- **`fillVocabTranslationsFromCache` 統一呼叫點，不分散在各生成器**（`src/cards/translationFiller.ts`，2026-06-09）：`index.ts` 有 4 個獨立的輸出路徑（beginner words CSV 匯入、beginner tokens CSV 匯入、general CSV 匯入、主 PDF/EPUB 流程），每條路徑在輸出前各自呼叫 `fillVocabTranslationsFromCache`。若改在各生成器內部補填，新增生成器時容易遺漏；集中在輸出前作為後處理步驟，職責單純且易驗證。`FillResult` 返回值讓呼叫端決定是否顯示補填摘要，函式本身不耦合 UI 輸出。
+
+- **CLI 一律在 header 顯示執行指令與快取路徑**（`src/index.ts`，2026-06-09）：從 `process.argv.slice(2)` 重建執行指令字串（含空白的參數加引號），搭配 `WORD_CACHE_PATH` env（或預設 `~/.novel2anki`）計算快取目錄，在所有指令的 header 統一輸出。方便使用者確認當下執行的是哪一個 CSV 路徑，以及資料寫入哪個目錄，避免因快取路徑設定不同而導致資料寫錯位置。

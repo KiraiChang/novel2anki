@@ -30,6 +30,7 @@ import { getWordCache } from './nlp/wordCache';
 import { fillVocabTranslationsFromCache } from './cards/translationFiller';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
+import * as os from 'os';
 import { GeneratedCards } from './cards/types';
 import { runNlpPipeline, processChunk } from './nlp/pipeline';
 import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
@@ -127,6 +128,12 @@ program
     if (isCompare) console.log(chalk.blue(`   [${providerLabel} 比對模式：${providerLabel} vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
+    const runCmd = process.argv.slice(2).map(a => /\s/.test(a) ? `"${a}"` : a).join(' ');
+    console.log(chalk.gray(`   指令：npx ts-node src/index.ts ${runCmd}`));
+    const cacheDir = process.env['WORD_CACHE_PATH']
+      ? path.resolve(process.env['WORD_CACHE_PATH'])
+      : path.join(os.homedir(), '.novel2anki');
+    console.log(chalk.gray(`   快取：${cacheDir}`));
     console.log('');
 
     // CEFR 字庫 MW 預查：不需要輸入檔案，直接讀內建字庫
@@ -359,8 +366,25 @@ program
           process.exit(1);
         }
 
-        // 字彙統計
+        // 字彙統計（預先計算，顯示移至回填後）
         const bwStats = computeBeginnerWordStats(beginnerWordsCsvs);
+        const statsHtmlPath = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
+
+        const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
+
+        // 回填快取翻譯（含進度）
+        console.log('');
+        const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
+          const pct = String(Math.round(cur / cnt * 100)).padStart(3);
+          const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
+          process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
+        });
+        if (csvCards.vocab.length === 0) console.log('');
+        if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
+          console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
+        }
+
+        // 字彙統計（回填完成後顯示）
         const translatedPct = bwStats.total > 0 ? Math.round(bwStats.translated / bwStats.total * 100) : 0;
         const CEFR_ORDER = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'UNKNOWN'];
         const statSep = chalk.gray('─'.repeat(40));
@@ -384,11 +408,8 @@ program
           console.log(statSep);
           console.log(`覆蓋率排名：#${bwStats.rankMin} – #${bwStats.rankMax}`);
         }
-        const statsHtmlPath = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
         console.log(chalk.green(`✓ 字彙統計 HTML：${statsHtmlPath}`));
 
-        const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
-        fillVocabTranslationsFromCache(csvCards);
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
         const apkgPath = await exportToApkg(csvCards, deckName, options.output);
@@ -417,7 +438,16 @@ program
         }
         const vocabCards = mergeTokensToVocabCards(tokens);
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
-        fillVocabTranslationsFromCache(csvCards);
+        console.log('');
+        const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
+          const pct = String(Math.round(cur / cnt * 100)).padStart(3);
+          const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
+          process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
+        });
+        if (csvCards.vocab.length === 0) console.log('');
+        if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
+          console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
+        }
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
         const apkgPath = await exportToApkg(csvCards, deckName, options.output);
@@ -444,7 +474,15 @@ program
         process.exit(1);
       }
       console.log('');
-      fillVocabTranslationsFromCache(csvCards);
+      const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
+        const pct = String(Math.round(cur / cnt * 100)).padStart(3);
+        const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
+        process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
+      });
+      if (csvCards.vocab.length === 0) console.log('');
+      if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
+        console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
+      }
       console.log(chalk.yellow('正在匯出檔案...'));
       const apkgPath = await exportToApkg(csvCards, deckName, options.output);
       const htmlPath = exportToHtml(csvCards, deckName, options.output);
@@ -790,7 +828,15 @@ program
       allCards.character = chunkResults.flatMap(({ cards }) => cards.character);
     }
 
-    fillVocabTranslationsFromCache(allCards);
+    const fillResult = fillVocabTranslationsFromCache(allCards, (cur, cnt) => {
+      const pct = String(Math.round(cur / cnt * 100)).padStart(3);
+      const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
+      process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
+    });
+    if (allCards.vocab.length === 0) console.log('');
+    if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
+      console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
+    }
 
     const total = allCards.vocab.length + allCards.cloze.length + allCards.character.length + allCards.plot.length;
     console.log('');
