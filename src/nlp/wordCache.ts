@@ -98,6 +98,38 @@ export class WordCacheManager {
     return !!this.cacheZh[this.key(word, pos)];
   }
 
+  /** 是否有任何 POS-specific cache（word:pos）條目，不含 dict（供 prefetch skip 判斷） */
+  hasPosCache(word: string): boolean {
+    const w = word.toLowerCase().trim();
+    return Object.keys(this.cache).some(k => k.startsWith(`${w}:`));
+  }
+
+  /** 刪除所有 POS-specific 英文快取（word:pos），保留 base key（word）。回傳刪除筆數。 */
+  clearPosCache(): number {
+    let count = 0;
+    for (const k of Object.keys(this.cache)) {
+      if (k.includes(':')) {
+        delete this.cache[k];
+        count++;
+        this.cacheDirty = true;
+      }
+    }
+    return count;
+  }
+
+  /** 刪除所有 POS-specific 中文快取（word:pos），保留 base key（word）。回傳刪除筆數。 */
+  clearPosCacheZh(): number {
+    let count = 0;
+    for (const k of Object.keys(this.cacheZh)) {
+      if (k.includes(':')) {
+        delete this.cacheZh[k];
+        count++;
+        this.cacheZhDirty = true;
+      }
+    }
+    return count;
+  }
+
   /** 寫入中文翻譯快取（in-memory，呼叫 flush() 才落盤） */
   setChinese(word: string, pos: string | null | undefined, zh: string, source: string): void {
     this.cacheZh[this.key(word, pos)] = { zh, source };

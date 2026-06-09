@@ -15,6 +15,7 @@ const mockCache = {
   setChinese:               jest.fn(),
   flush:                    jest.fn(),
   hasChinese:               jest.fn(),
+  hasPosCache:              jest.fn(),
   getAllCacheEntriesForWord: jest.fn(),
   cacheSize:                0,
 };
@@ -30,10 +31,11 @@ const DEEPL_CONFIG = { provider: 'deepl' as const, apiKey: 'test-deepl-key' };
 beforeEach(() => {
   jest.clearAllMocks();
   (getWordCache as jest.Mock).mockReturnValue(mockCache);
-  mockCache.get.mockReturnValue(null);                    // 預設：英文 cache miss（供 prefetchCefrToWordCache）
-  mockCache.getChinese.mockReturnValue(null);             // 預設：中文 cache miss（保留相容性）
-  mockCache.hasChinese.mockReturnValue(false);            // 預設：無任何 zh 快取
-  mockCache.getAllCacheEntriesForWord.mockReturnValue([]); // 預設：無英文條目
+  mockCache.get.mockReturnValue(null);                     // 預設：英文 cache miss
+  mockCache.getChinese.mockReturnValue(null);              // 預設：中文 cache miss
+  mockCache.hasChinese.mockReturnValue(false);             // 預設：無任何 zh 快取
+  mockCache.hasPosCache.mockReturnValue(false);            // 預設：無 POS-specific cache 條目
+  mockCache.getAllCacheEntriesForWord.mockReturnValue([]);  // 預設：無英文條目
   delete process.env.MW_API_KEY;
   global.fetch = jest.fn();
 });
@@ -47,19 +49,8 @@ afterEach(() => {
 // ── 快取命中（跳過邏輯）──────────────────────────────────────────────────────
 
 describe('prefetchCefrToWordCache — cache hit', () => {
-  it('should skip word and increment skippedCount when word-cache has base-key hit', async () => {
-    // Given
-    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
-    // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
-    // Then
-    expect(result.skippedCount).toBe(1);
-    expect(result.fetchedCount).toBe(0);
-    expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  it('should skip word and report tier=dict when word-dict has entry', async () => {
-    // Given
+  it('should skip word and report source=dict when word-dict has entry', async () => {
+    // Given: dict entry → always skip regardless of POS cache
     mockCache.get.mockReturnValue({ def: '(verb) curated', tier: 'dict' });
     const progress: string[] = [];
     // When
@@ -69,9 +60,31 @@ describe('prefetchCefrToWordCache — cache hit', () => {
     expect(mockCache.setCache).not.toHaveBeenCalled();
   });
 
-  it('should return skippedCount equal to total when all words are cached', async () => {
+  it('should skip word and increment skippedCount when POS cache entries exist', async () => {
+    // Given: hasPosCache returns true → POS entries already correct
+    mockCache.hasPosCache.mockReturnValue(true);
+    // When
+    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    // Then
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('should NOT skip word when only base cache key exists (no POS entries)', async () => {
+    // Given: base key exists but no POS entries → re-fetch to populate POS entries
+    mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
+    mockCache.hasPosCache.mockReturnValue(false);
+    // When: no MW key → failedCount (but NOT skipped)
+    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    // Then: attempted fetch (failed due to no key), not skipped
+    expect(result.skippedCount).toBe(0);
+    expect(result.failedCount).toBe(1);
+  });
+
+  it('should return skippedCount equal to total when all words have POS cache entries', async () => {
     // Given
-    mockCache.get.mockReturnValue({ def: '(verb) cached', tier: 'cache' });
+    mockCache.hasPosCache.mockReturnValue(true);
     // When
     const result = await prefetchCefrToWordCache(undefined, TEST_WORDS);
     // Then
@@ -139,6 +152,31 @@ describe('prefetchCefrToWordCache — MW API success', () => {
     // Then
     expect(mockCache.setCache).toHaveBeenCalledWith('run', 'verb', expect.stringContaining('to move on foot'), 'MW');
     expect(mockCache.setCache).toHaveBeenCalledWith('run', 'noun', expect.stringContaining('a race or contest'), 'MW');
+  });
+
+  it('should NOT overwrite first POS entry with later compound-word entries sharing same POS', async () => {
+    // Given: MW returns main entry + compound entry with same POS (root cause of the bug)
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { fl: 'noun', shortdef: ['a structure built across a river'] },   // correct: cross
+        { fl: 'verb', shortdef: ['to go from one side to the other'] },   // correct: cross
+        { fl: 'noun', shortdef: ['the act of wearing clothes for opposite sex'] }, // compound: cross-dressing
+        { fl: 'verb', shortdef: ['to ask more questions of a witness'] },          // compound: cross-examine
+      ],
+    });
+    // When
+    await prefetchCefrToWordCache(undefined, ['cross']);
+    // Then: only first noun and first verb stored; compound entries discarded
+    expect(mockCache.setCache).toHaveBeenCalledWith('cross', 'noun', expect.stringContaining('a structure built across'), 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('cross', 'verb', expect.stringContaining('to go from one side'), 'MW');
+    // Compound entries must NOT have been stored
+    const calls = (mockCache.setCache as jest.Mock).mock.calls;
+    const nounCalls = calls.filter(([, pos]) => pos === 'noun');
+    const verbCalls = calls.filter(([, pos]) => pos === 'verb');
+    expect(nounCalls).toHaveLength(1);
+    expect(verbCalls).toHaveLength(1);
   });
 
   it('should also store base (POS-agnostic) key with first usable definition', async () => {
@@ -243,12 +281,9 @@ describe('prefetchCefrToWordCache — flush and counts', () => {
   });
 
   it('should return correct counts for mixed results', async () => {
-    // Given: run → cached, bear → MW success, go → fetch error
+    // Given: run → has POS cache (skip), bear → MW success, go → fetch error
     process.env.MW_API_KEY = 'test-key';
-    mockCache.get
-      .mockReturnValueOnce({ def: '(verb) to sprint', tier: 'cache' }) // run → skip
-      .mockReturnValueOnce(null)                                        // bear → fetch
-      .mockReturnValueOnce(null);                                       // go → fetch
+    mockCache.hasPosCache.mockImplementation((w: string) => w === 'run');
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({
         ok: true,

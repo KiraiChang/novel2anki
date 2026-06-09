@@ -49,14 +49,18 @@ export async function prefetchCefrToWordCache(
   for (let i = 0; i < cefrWords.length; i++) {
     const word = cefrWords[i];
 
-    // 已有任何快取（dict 或 cache，含 POS-agnostic key）→ 跳過
+    // dict 條目優先等級最高，永遠跳過
     const hit = wc.get(word, null);
-    if (hit) {
+    if (hit?.tier === 'dict') {
       skippedCount++;
-      onProgress?.(i + 1, cefrWords.length, {
-        word,
-        source: hit.tier === 'dict' ? 'dict' : 'cached',
-      });
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'dict' });
+      continue;
+    }
+    // 已有 POS-specific cache 條目 → 跳過（已正確取得）
+    // 注意：只有 base key（word）而無 POS key 時仍繼續抓取（用於資料修復後重建）
+    if (wc.hasPosCache(word)) {
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'cached' });
       continue;
     }
 
@@ -89,11 +93,14 @@ export async function prefetchCefrToWordCache(
         continue;
       }
 
-      // 每個 POS entry 各存一筆（run:verb, run:noun, …）
+      // 每個 POS 只取第一筆 entry（MW 回傳複合詞時會有多筆同 POS，後者蓋前者）
       let firstFormatted: string | null = null;
+      const storedPos = new Set<string>();
       for (const entry of entries) {
+        if (!entry.fl || storedPos.has(entry.fl)) continue;
         const def = entry.shortdef?.find(isUsable);
-        if (!def || !entry.fl) continue;
+        if (!def) continue;
+        storedPos.add(entry.fl);
         const formatted = `(${entry.fl}) ${def}`;
         wc.setCache(word, entry.fl, formatted, 'MW');
         if (!firstFormatted) firstFormatted = formatted;
