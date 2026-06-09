@@ -148,7 +148,7 @@ export interface PrefetchZhResult {
 }
 
 const DEEPL_BATCH = 50;
-const INTER_BATCH_DELAY_MS = 2000;
+const INTER_BATCH_DELAY_MS = 500;
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
