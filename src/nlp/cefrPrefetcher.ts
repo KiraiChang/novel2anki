@@ -12,10 +12,16 @@ interface MWEntry {
   shortdef?: string[];
 }
 
-const isUsable = (def: string) =>
-  def.length >= 10 &&
-  !/^(see|compare|synonym of)/i.test(def.trim()) &&
-  !/(:\s*(such as)?\s*)$/.test(def.trim());
+/** MW shortdef 中所有 em-dash（—）以後均為語法/用法標記，不屬於定義本文，翻譯前剝除 */
+const stripMwNotation = (def: string): string =>
+  def.replace(/\s*—.*/g, '').trim();
+
+const isUsable = (def: string) => {
+  const s = stripMwNotation(def);
+  return s.length >= 10 &&
+    !/^(see|compare|synonym of)/i.test(s.trim()) &&
+    !/(:\s*(such as)?\s*)$/.test(s.trim());
+};
 
 export interface PrefetchProgress {
   word: string;
@@ -106,8 +112,9 @@ export async function prefetchCefrToWordCache(
         if (!entry.fl || storedPos.has(entry.fl)) continue;
         const def = entry.shortdef?.find(isUsable);
         if (!def) continue;
+        const strippedDef = stripMwNotation(def);
         storedPos.add(entry.fl);
-        const formatted = `(${entry.fl}) ${def}`;
+        const formatted = `(${entry.fl}) ${strippedDef}`;
         wc.setCache(word, entry.fl, formatted, 'MW');
         if (!firstFormatted) firstFormatted = formatted;
       }

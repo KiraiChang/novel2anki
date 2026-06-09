@@ -262,6 +262,40 @@ describe('prefetchCefrToWordCache — MW API failures', () => {
     // Then
     expect(result.failedCount).toBe(1);
   });
+
+  it('should strip MW em-dash notation before storing definition', async () => {
+    // Given — MW shortdef often appends "—often used figuratively" or "—+ at" usage notes
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { fl: 'verb', shortdef: ['to move in a steady and continuous way —often used figuratively'] },
+        { fl: 'noun', shortdef: ['to think about something carefully —+ on or about'] },
+      ],
+    });
+    // When
+    await prefetchCefrToWordCache(undefined, ['flow']);
+    // Then — notation stripped, only the definition content stored
+    expect(mockCache.setCache).toHaveBeenCalledWith('flow', 'verb', '(verb) to move in a steady and continuous way', 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('flow', 'noun', '(noun) to think about something carefully', 'MW');
+  });
+
+  it('should skip a shortdef entry that becomes too short after stripping MW notation', async () => {
+    // Given — entire shortdef is a usage note with no definition content before the dash
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { fl: 'preposition', shortdef: ['—used to indicate the value of something'] }, // starts with dash, < 10 chars after strip
+        { fl: 'adjective', shortdef: ['having a value equal to the price or cost of something'] }, // valid fallback
+      ],
+    });
+    // When
+    await prefetchCefrToWordCache(undefined, ['worth']);
+    // Then — preposition entry dropped, adjective entry stored
+    expect(mockCache.setCache).not.toHaveBeenCalledWith('worth', 'preposition', expect.anything(), 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('worth', 'adjective', '(adjective) having a value equal to the price or cost of something', 'MW');
+  });
 });
 
 // ── flush & 計數 ──────────────────────────────────────────────────────────────
