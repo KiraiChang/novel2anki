@@ -33,6 +33,7 @@
 - [ ] **多來源並存 `word-cache-zh.json` 升級**：現行 key→string 結構改為 key→`{ deepl?: string, azure?: string, csv?: string, claude?: string, preferred?: string }`，可保存多個來源版本；讀取時依優先序（`preferred` > `csv` > `deepl` > 其他）取值，不同書的同詞翻譯不互相蓋掉。需遷移現有資料。
 - [ ] **翻譯來源標記顯示**：`--fill-def-zh` 補填時在 CSV 輸出一欄 `definition_zh_source`（`deepl` / `csv` / `claude` 等），方便使用者辨識翻譯來源品質。
 - [ ] **自動優先序升級**：`--update-dict`（現有旗標）執行後，對應 `word-cache-zh.json` 條目的 `preferred` 欄位自動指向 `csv`，確保下次補填時使用已審核版本。
+- [ ] **`word_zh` 對應詞欄位**：`CacheZhEntry` 新增 `word_zh?: string`（直接對應的中文單字，如「橋樑」），與現有 `zh`（定義直譯，如「一種橫跨河流的建築」）並存。資料來源：Azure Dictionary Lookup API（`/dictionary/lookup?from=en&to=zh-Hant`，回傳 POS-tagged 翻譯，免費額度 2M chars/month）。Anki 背面顯示 `word_zh` 為主答案，`zh` 為輔助解釋。向後相容：`zh` 保留，`word_zh` 為選填欄位，新增 `--prefetch-word-zh` CLI 旗標填入。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併
