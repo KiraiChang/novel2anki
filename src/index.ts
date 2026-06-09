@@ -118,7 +118,7 @@ program
     const isCompare = options.deepl && (options.offline || (!options.mock && process.env.ANTHROPIC_API_KEY));
 
     const providerLabel = (process.env['TRANSLATE_PROVIDER'] ?? 'DeepL').toUpperCase();
-    console.log(chalk.cyan(`\n📖 PDF 小說 → Anki 字卡產生器`));
+    console.log(chalk.cyan(`\n📖 小說 → Anki 字卡產生器`));
     if (options.mock)   console.log(chalk.yellow('   [模擬模式：不使用 AI API]'));
     if (options.offline) console.log(chalk.yellow(`   [離線模式：Ollama ${ollamaConfig!.model}]`));
     if (options.updateDict) console.log(chalk.magenta('   [個人單字庫升級模式]'));
@@ -245,6 +245,7 @@ program
           console.log(chalk.gray(`  快取現有：${wc.sentenceCacheSize} 筆`));
           console.log('');
           let totalSaved = 0;
+          let totalSkipped = 0;
           let totalFilled = 0;
           let totalNoMatch = 0;
           for (const csvPath of beginnerWordsCsvs) {
@@ -256,13 +257,14 @@ program
                                       chalk.gray('[略過]');
               process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})  ${tag}   `);
             });
-            process.stdout.write(`\r${chalk.green(`  ✓ 存入快取 ${result.savedToCache} 筆 | 補填 CSV ${result.filledFromCache} 筆 | 略過 ${result.noMatch} 筆`)}\n`);
-            totalSaved   += result.savedToCache;
-            totalFilled  += result.filledFromCache;
-            totalNoMatch += result.noMatch;
+            process.stdout.write(`\r${chalk.green(`  ✓ 存入快取 ${result.savedToCache} 筆 | 快取已有 ${result.skippedCache} 筆 | 補填 CSV ${result.filledFromCache} 筆 | 略過 ${result.noMatch} 筆`)}\n`);
+            totalSaved    += result.savedToCache;
+            totalSkipped  += result.skippedCache;
+            totalFilled   += result.filledFromCache;
+            totalNoMatch  += result.noMatch;
           }
           console.log('');
-          console.log(chalk.green(`完成：共存入快取 ${totalSaved} 筆 | 補填 CSV ${totalFilled} 筆 | 略過 ${totalNoMatch} 筆`));
+          console.log(chalk.green(`完成：共存入快取 ${totalSaved} 筆 | 快取已有 ${totalSkipped} 筆 | 補填 CSV ${totalFilled} 筆 | 略過 ${totalNoMatch} 筆`));
           console.log(chalk.gray(`sentence-cache.json：${getWordCache().sentenceCacheSize} 筆`));
           return;
         }
@@ -276,6 +278,7 @@ program
           console.log(chalk.gray(`  快取現有：${wc.cacheZhSize} 筆`));
           console.log('');
           let totalSaved = 0;
+          let totalSkipped = 0;
           let totalFilled = 0;
           let totalNoMatch = 0;
           for (const csvPath of beginnerWordsCsvs) {
@@ -287,13 +290,14 @@ program
                                       chalk.gray('[略過]');
               process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})  ${tag}   `);
             });
-            process.stdout.write(`\r${chalk.green(`  ✓ 存入快取 ${result.savedToCache} 筆 | 補填 CSV ${result.filledFromCache} 筆 | 略過 ${result.noMatch} 筆`)}\n`);
-            totalSaved   += result.savedToCache;
-            totalFilled  += result.filledFromCache;
-            totalNoMatch += result.noMatch;
+            process.stdout.write(`\r${chalk.green(`  ✓ 存入快取 ${result.savedToCache} 筆 | 快取已有 ${result.skippedCache} 筆 | 補填 CSV ${result.filledFromCache} 筆 | 略過 ${result.noMatch} 筆`)}\n`);
+            totalSaved    += result.savedToCache;
+            totalSkipped  += result.skippedCache;
+            totalFilled   += result.filledFromCache;
+            totalNoMatch  += result.noMatch;
           }
           console.log('');
-          console.log(chalk.green(`完成：共存入快取 ${totalSaved} 筆 | 補填 CSV ${totalFilled} 筆 | 略過 ${totalNoMatch} 筆`));
+          console.log(chalk.green(`完成：共存入快取 ${totalSaved} 筆 | 快取已有 ${totalSkipped} 筆 | 補填 CSV ${totalFilled} 筆 | 略過 ${totalNoMatch} 筆`));
           console.log(chalk.gray(`word-cache-zh.json：${getWordCache().cacheZhSize} 筆`));
           return;
         }

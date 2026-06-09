@@ -114,17 +114,18 @@ describe('syncDefinitionCacheWithCsv — cache → CSV (empty definition_zh + ca
     expect(defZhValues[0]).toBe('奔跑');
   });
 
-  it('should NOT overwrite non-empty definition_zh', () => {
-    // Given
-    mockGetChinese.mockReturnValue('快取翻譯');
+  it('should NOT overwrite cache when cache already has a value for the word', () => {
+    // Given: row has definition_zh AND cache already has a value → skip, do not overwrite
+    mockGetChinese.mockReturnValue('快取已有翻譯');
     const csvPath = writeCsv(tmpDir, 'test.csv', [
       makeRow({ lemma: 'run', pos: 'Verb', defZh: '已有翻譯' }),
     ]);
     // When
     const result = syncDefinitionCacheWithCsv(csvPath);
-    // Then
-    expect(mockSetChinese).toHaveBeenCalledWith('run', 'Verb', '已有翻譯', 'csv');
-    expect(result.savedToCache).toBe(1);
+    // Then: setChinese not called; skippedCache incremented
+    expect(mockSetChinese).not.toHaveBeenCalled();
+    expect(result.savedToCache).toBe(0);
+    expect(result.skippedCache).toBe(1);
     expect(result.filledFromCache).toBe(0);
   });
 

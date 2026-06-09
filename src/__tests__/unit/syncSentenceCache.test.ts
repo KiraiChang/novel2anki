@@ -114,17 +114,18 @@ describe('syncSentenceCacheWithCsv — cache → CSV (empty sentenceZh + cache h
     expect(rows[0][7]).toBe('他跑得很快。'); // index 7 = context_sentence_zh
   });
 
-  it('should NOT overwrite non-empty context_sentence_zh', () => {
-    // Given: row already has sentenceZh
-    mockGetSentenceZh.mockReturnValue('快取翻譯');
+  it('should NOT overwrite cache when cache already has a value for the sentence', () => {
+    // Given: row has sentenceZh AND cache already has a value → skip, do not overwrite
+    mockGetSentenceZh.mockReturnValue('快取已有翻譯');
     const csvPath = writeCsv(tmpDir, 'test.csv', [
       makeRow({ sentence: 'He ran fast.', sentenceZh: '已有翻譯' }),
     ]);
     // When
     const result = syncSentenceCacheWithCsv(csvPath);
-    // Then: existing value preserved, saved to cache
-    expect(mockSetSentenceZh).toHaveBeenCalledWith('He ran fast.', '已有翻譯');
-    expect(result.savedToCache).toBe(1);
+    // Then: setSentenceZh not called; skippedCache incremented
+    expect(mockSetSentenceZh).not.toHaveBeenCalled();
+    expect(result.savedToCache).toBe(0);
+    expect(result.skippedCache).toBe(1);
     expect(result.filledFromCache).toBe(0);
   });
 

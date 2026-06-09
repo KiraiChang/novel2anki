@@ -20,6 +20,19 @@
 - [x] **`--fill-sent-zh` 雙向同步 CLI**（`src/index.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：新增 `--fill-sent-zh` 旗標，對 beginner words CSV 執行 `syncSentenceCacheWithCsv`：非空 `context_sentence_zh` 存入 sentence-cache；空白列從快取補填；僅有填入時才重寫 CSV。不需 API key。
 - [x] **CLI 執行資訊顯示 + 補填進度**（`src/index.ts`、`src/cards/translationFiller.ts`，2026-06-09）：每次執行任何指令時 header 顯示完整執行指令與快取路徑（`WORD_CACHE_PATH` 或預設 `~/.novel2anki`）。`fillVocabTranslationsFromCache` 新增 `onProgress` 回呼與 `FillResult` 返回值，4 個呼叫點均顯示即時百分比進度，完成後報告補填筆數。beginner words 路徑的字彙統計改為在補填完成後才輸出。
 - [x] **`--fill-def-zh` 雙向同步定義翻譯 CLI**（`src/index.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：新增 `--fill-def-zh` 旗標，對 beginner words CSV 執行 `syncDefinitionCacheWithCsv`：非空 `definition_zh` 存入 `word-cache-zh.json`（key: `lemma:pos`）；空白列從快取補填；僅有填入時才重寫 CSV。不需 API key。
+- [x] **快取覆寫保護 `skippedCache`**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：`syncSentenceCacheWithCsv` 與 `syncDefinitionCacheWithCsv` 的 CSV→cache 方向加入先查快取邏輯：快取已有值時略過不覆寫，計入 `skippedCache` 回傳欄位。CLI 顯示格式新增「快取已有 N 筆」欄位。
+
+## 翻譯品質改善（待規劃）
+
+- [ ] **多後端翻譯比對 `--compare-trans`**：同批詞彙透過兩個翻譯提供者（如 DeepL + Azure）各跑一次，輸出對照表供人工審核，找出翻譯差異較大的詞彙集中修正。
+- [ ] **Claude 翻譯品質評分**：以 Claude API 對快取中的中文翻譯進行語義評分（0–10），低分詞彙標記為待複查；評分結果存入 `word-cache-zh.json` 的 `quality` 欄位。
+- [ ] **`--review-zh` 翻譯審核 CLI**：列出 `word-cache-zh.json` 中各來源（`deepl` / `azure` / `csv` / `claude`）的翻譯條目，標記低品質或來源多元的詞彙，提供互動式確認流程將優先版本升級到 `word-dict.json`。
+
+## 單字翻譯快取改善（待規劃）
+
+- [ ] **多來源並存 `word-cache-zh.json` 升級**：現行 key→string 結構改為 key→`{ deepl?: string, azure?: string, csv?: string, claude?: string, preferred?: string }`，可保存多個來源版本；讀取時依優先序（`preferred` > `csv` > `deepl` > 其他）取值，不同書的同詞翻譯不互相蓋掉。需遷移現有資料。
+- [ ] **翻譯來源標記顯示**：`--fill-def-zh` 補填時在 CSV 輸出一欄 `definition_zh_source`（`deepl` / `csv` / `claude` 等），方便使用者辨識翻譯來源品質。
+- [ ] **自動優先序升級**：`--update-dict`（現有旗標）執行後，對應 `word-cache-zh.json` 條目的 `preferred` 欄位自動指向 `csv`，確保下次補填時使用已審核版本。
 
 - [ ] 新增 `--verbose` / `--debug` 旗標，輸出 API 呼叫詳情與 token 用量
 - [ ] 卡片去重：相同單字 / 相同 Cloze 文本跨區塊合併

@@ -515,7 +515,8 @@ export async function updateWordDictFromCsv(
 // ── 例句快取雙向同步 ───────────────────────────────────────────────────────────
 
 export interface SyncSentenceResult {
-  savedToCache:    number;  // CSV → sentence-cache（非空例句翻譯存入快取）
+  savedToCache:    number;  // CSV → sentence-cache（非空且快取尚無才存入）
+  skippedCache:    number;  // CSV → sentence-cache（快取已有，略過不覆寫）
   filledFromCache: number;  // sentence-cache → CSV（空例句翻譯從快取補填）
   noMatch:         number;  // 空且快取也找不到
   outputPath:      string;
@@ -523,7 +524,7 @@ export interface SyncSentenceResult {
 
 /**
  * 雙向同步例句翻譯：
- * - context_sentence_zh 不為空 → 寫入 sentence-cache.json
+ * - context_sentence_zh 不為空 → 快取尚無才寫入 sentence-cache.json；已有則略過
  * - context_sentence_zh 為空   → 從 sentence-cache.json 補填
  * 若有任何 CSV 更新，自動寫回檔案。
  */
@@ -534,7 +535,7 @@ export function syncSentenceCacheWithCsv(
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
   if (lines.length < 2) {
-    return { savedToCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
+    return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
   }
 
   const headers = parseRow(lines[0]);
@@ -546,11 +547,12 @@ export function syncSentenceCacheWithCsv(
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
   if (sentEnColIdx === undefined) {
-    return { savedToCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
+    return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
 
   const wc = getWordCache();
   let savedToCache    = 0;
+  let skippedCache    = 0;
   let filledFromCache = 0;
   let noMatch         = 0;
   let csvDirty        = false;
@@ -560,10 +562,15 @@ export function syncSentenceCacheWithCsv(
     const zhSent = sentZhColIdx !== undefined ? get(rows[i], 'context_sentence_zh').trim() : '';
 
     if (zhSent) {
-      // CSV → cache：已有翻譯，存入快取
-      wc.setSentenceZh(enSent, zhSent);
-      savedToCache++;
-      onProgress?.(i + 1, rows.length, 'saved');
+      // CSV → cache：快取尚無才存入，已有則略過
+      if (!wc.getSentenceZh(enSent)) {
+        wc.setSentenceZh(enSent, zhSent);
+        savedToCache++;
+        onProgress?.(i + 1, rows.length, 'saved');
+      } else {
+        skippedCache++;
+        onProgress?.(i + 1, rows.length, 'skip');
+      }
     } else if (enSent) {
       // cache → CSV：嘗試從快取補填
       const cached = wc.getSentenceZh(enSent);
@@ -590,13 +597,14 @@ export function syncSentenceCacheWithCsv(
   }
 
   wc.flush();
-  return { savedToCache, filledFromCache, noMatch, outputPath: csvPath };
+  return { savedToCache, skippedCache, filledFromCache, noMatch, outputPath: csvPath };
 }
 
 // ── 定義翻譯快取雙向同步 ──────────────────────────────────────────────────────
 
 export interface SyncDefinitionResult {
-  savedToCache:    number;  // CSV → word-cache-zh（非空 definition_zh 存入快取）
+  savedToCache:    number;  // CSV → word-cache-zh（非空且快取尚無才存入）
+  skippedCache:    number;  // CSV → word-cache-zh（快取已有，略過不覆寫）
   filledFromCache: number;  // word-cache-zh → CSV（空 definition_zh 從快取補填）
   noMatch:         number;  // 空且快取也找不到
   outputPath:      string;
@@ -604,7 +612,7 @@ export interface SyncDefinitionResult {
 
 /**
  * 雙向同步詞彙中文定義：
- * - definition_zh 不為空 → 寫入 word-cache-zh.json（key: lemma:pos）
+ * - definition_zh 不為空 → 快取尚無才寫入 word-cache-zh.json（key: lemma:pos）；已有則略過
  * - definition_zh 為空   → 從 word-cache-zh.json 補填（lemma:pos → lemma fallback）
  * 若有任何 CSV 更新，自動寫回檔案。
  */
@@ -615,7 +623,7 @@ export function syncDefinitionCacheWithCsv(
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
   if (lines.length < 2) {
-    return { savedToCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
+    return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
   }
 
   const headers = parseRow(lines[0]);
@@ -625,11 +633,12 @@ export function syncDefinitionCacheWithCsv(
 
   const defZhColIdx = idx['definition_zh'];
   if (defZhColIdx === undefined) {
-    return { savedToCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
+    return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
 
   const wc = getWordCache();
   let savedToCache    = 0;
+  let skippedCache    = 0;
   let filledFromCache = 0;
   let noMatch         = 0;
   let csvDirty        = false;
@@ -646,10 +655,15 @@ export function syncDefinitionCacheWithCsv(
     }
 
     if (defZh) {
-      // CSV → cache：已有翻譯，存入快取
-      wc.setChinese(lemma, pos, defZh, 'csv');
-      savedToCache++;
-      onProgress?.(i + 1, rows.length, 'saved');
+      // CSV → cache：快取尚無才存入，已有則略過
+      if (!wc.getChinese(lemma, pos)) {
+        wc.setChinese(lemma, pos, defZh, 'csv');
+        savedToCache++;
+        onProgress?.(i + 1, rows.length, 'saved');
+      } else {
+        skippedCache++;
+        onProgress?.(i + 1, rows.length, 'skip');
+      }
     } else {
       // cache → CSV：嘗試從快取補填
       const cached = wc.getChinese(lemma, pos);
@@ -673,5 +687,5 @@ export function syncDefinitionCacheWithCsv(
   }
 
   wc.flush();
-  return { savedToCache, filledFromCache, noMatch, outputPath: csvPath };
+  return { savedToCache, skippedCache, filledFromCache, noMatch, outputPath: csvPath };
 }
