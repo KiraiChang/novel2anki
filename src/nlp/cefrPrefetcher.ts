@@ -7,6 +7,7 @@ const CEFR_PATH = path.join(__dirname, '../data/cefr-wordlist.json');
 const MW_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 
 interface MWEntry {
+  meta?: { id?: string };
   fl?: string;
   shortdef?: string[];
 }
@@ -94,9 +95,12 @@ export async function prefetchCefrToWordCache(
       }
 
       // 每個 POS 只取第一筆 entry（MW 回傳複合詞時會有多筆同 POS，後者蓋前者）
+      // meta.id 格式為 "word:N"（多音字）或 "word"；剝除 :N 後比對目標詞，過濾非本詞條目
       let firstFormatted: string | null = null;
       const storedPos = new Set<string>();
       for (const entry of entries) {
+        const headId = (entry.meta?.id ?? '').replace(/:\d+$/, '').toLowerCase();
+        if (headId && headId !== word.toLowerCase()) continue;
         if (!entry.fl || storedPos.has(entry.fl)) continue;
         const def = entry.shortdef?.find(isUsable);
         if (!def) continue;
@@ -144,7 +148,7 @@ export interface PrefetchZhResult {
 }
 
 const DEEPL_BATCH = 50;
-const INTER_BATCH_DELAY_MS = 500;
+const INTER_BATCH_DELAY_MS = 2000;
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 

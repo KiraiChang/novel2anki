@@ -70,6 +70,7 @@ program
   .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
   .option('--prefetch-cefr-zh', '批次將 word-cache.json 的英文定義翻成中文並存入 word-cache-zh.json（需設定 DEEPL_API_KEY；已翻譯的詞自動跳過）')
   .option('--clean-pos-cache', '清除 word-cache.json 與 word-cache-zh.json 中所有 POS-specific 條目（word:pos），保留 base key。修復複合詞覆寫問題後重建用。')
+  .option('--clean-zh-base', '清除 word-cache-zh.json 中所有 base 條目（word，無 POS），保留 POS key。重建中文翻譯前清除汙染 base key 用。')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -96,8 +97,9 @@ program
     prefetchCefr?: boolean;
     prefetchCefrZh?: boolean;
     cleanPosCache?: boolean;
+    cleanZhBase?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.cleanPosCache;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.cleanPosCache && !options.cleanZhBase;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -127,6 +129,7 @@ program
     if (options.prefetchCefr)    console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
     if (options.prefetchCefrZh)  console.log(chalk.blue(`   [CEFR 字庫中文翻譯模式：${providerLabel}]`));
     if (options.cleanPosCache)   console.log(chalk.red('   [POS 快取清除模式]'));
+    if (options.cleanZhBase)     console.log(chalk.red('   [ZH base key 清除模式]'));
     if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
     if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green(`   [MW 預查 + ${providerLabel} 翻譯模式]`));
     if (options.deepl && !isCompare) console.log(chalk.blue(`   [${providerLabel} 翻譯模式]`));
@@ -155,6 +158,20 @@ program
       console.log(chalk.green(`  ✓ word-cache-zh.json 已清除 ${zhRemoved} 筆 POS 條目（base key 保留）`));
       console.log('');
       console.log(chalk.yellow('請重新執行 --prefetch-cefr 重建正確 POS 條目，再執行 --prefetch-cefr-zh 重建中文翻譯。'));
+      return;
+    }
+
+    // ZH base key 清除：刪除 word-cache-zh.json 中所有無 POS 的 base 條目
+    if (options.cleanZhBase) {
+      const wc = getWordCache();
+      console.log(chalk.cyan('清除 ZH base key 條目'));
+      console.log(chalk.gray(`  word-cache-zh.json 路徑：${wc.cacheZhFilePath}`));
+      console.log('');
+      const removed = wc.clearBaseZhCache();
+      wc.flush();
+      console.log(chalk.green(`  ✓ word-cache-zh.json 已清除 ${removed} 筆 base key（POS key 保留）`));
+      console.log('');
+      console.log(chalk.yellow('請重新執行 --prefetch-cefr-zh 重建中文翻譯（各 POS 條目將重新翻譯，base key 自動衍生）。'));
       return;
     }
 

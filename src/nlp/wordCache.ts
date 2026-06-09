@@ -130,6 +130,19 @@ export class WordCacheManager {
     return count;
   }
 
+  /** 刪除所有 base 中文快取（word，無 POS），保留 POS key（word:pos）。回傳刪除筆數。 */
+  clearBaseZhCache(): number {
+    let count = 0;
+    for (const k of Object.keys(this.cacheZh)) {
+      if (!k.includes(':')) {
+        delete this.cacheZh[k];
+        count++;
+        this.cacheZhDirty = true;
+      }
+    }
+    return count;
+  }
+
   /** 寫入中文翻譯快取（in-memory，呼叫 flush() 才落盤） */
   setChinese(word: string, pos: string | null | undefined, zh: string, source: string): void {
     this.cacheZh[this.key(word, pos)] = { zh, source };
