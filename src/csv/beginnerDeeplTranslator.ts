@@ -592,3 +592,86 @@ export function syncSentenceCacheWithCsv(
   wc.flush();
   return { savedToCache, filledFromCache, noMatch, outputPath: csvPath };
 }
+
+// ── 定義翻譯快取雙向同步 ──────────────────────────────────────────────────────
+
+export interface SyncDefinitionResult {
+  savedToCache:    number;  // CSV → word-cache-zh（非空 definition_zh 存入快取）
+  filledFromCache: number;  // word-cache-zh → CSV（空 definition_zh 從快取補填）
+  noMatch:         number;  // 空且快取也找不到
+  outputPath:      string;
+}
+
+/**
+ * 雙向同步詞彙中文定義：
+ * - definition_zh 不為空 → 寫入 word-cache-zh.json（key: lemma:pos）
+ * - definition_zh 為空   → 從 word-cache-zh.json 補填（lemma:pos → lemma fallback）
+ * 若有任何 CSV 更新，自動寫回檔案。
+ */
+export function syncDefinitionCacheWithCsv(
+  csvPath: string,
+  onProgress?: (current: number, total: number, action: 'saved' | 'filled' | 'skip') => void,
+): SyncDefinitionResult {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) {
+    return { savedToCache: 0, filledFromCache: 0, noMatch: 0, outputPath: csvPath };
+  }
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  const defZhColIdx = idx['definition_zh'];
+  if (defZhColIdx === undefined) {
+    return { savedToCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
+  }
+
+  const wc = getWordCache();
+  let savedToCache    = 0;
+  let filledFromCache = 0;
+  let noMatch         = 0;
+  let csvDirty        = false;
+
+  for (let i = 0; i < rows.length; i++) {
+    const lemma = get(rows[i], 'lemma').trim();
+    const pos   = get(rows[i], 'pos').trim() || null;
+    const defZh = get(rows[i], 'definition_zh').trim();
+
+    if (!lemma) {
+      noMatch++;
+      onProgress?.(i + 1, rows.length, 'skip');
+      continue;
+    }
+
+    if (defZh) {
+      // CSV → cache：已有翻譯，存入快取
+      wc.setChinese(lemma, pos, defZh, 'csv');
+      savedToCache++;
+      onProgress?.(i + 1, rows.length, 'saved');
+    } else {
+      // cache → CSV：嘗試從快取補填
+      const cached = wc.getChinese(lemma, pos);
+      if (cached) {
+        while (rows[i].length <= defZhColIdx) rows[i].push('');
+        rows[i][defZhColIdx] = cached;
+        filledFromCache++;
+        csvDirty = true;
+        onProgress?.(i + 1, rows.length, 'filled');
+      } else {
+        noMatch++;
+        onProgress?.(i + 1, rows.length, 'skip');
+      }
+    }
+  }
+
+  if (csvDirty) {
+    const headerLine = headers.map(escapeField).join(',');
+    const dataLines  = rows.map(cols => cols.map(escapeField).join(','));
+    fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+  }
+
+  wc.flush();
+  return { savedToCache, filledFromCache, noMatch, outputPath: csvPath };
+}

@@ -51,6 +51,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
   --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
   --fill-sent-zh          雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填
+  --fill-def-zh           雙向同步詞彙中文定義：已有 definition_zh 的寫入 word-cache-zh.json；空白的從快取補填
 ```
 
 ## 使用範例
@@ -441,6 +442,24 @@ npx ts-node src/index.ts output/ --fill-sent-zh
 - **存入快取**：CSV 中已有 `context_sentence_zh` 的列，翻譯寫入 `sentence-cache.json`
 - **補填 CSV**：CSV 中原本空白、快取命中的列，填入翻譯並更新 CSV 檔案
 - **略過**：例句為空，或快取中找不到對應翻譯的列
+
+## 詞彙定義快取（`--fill-def-zh`）
+
+`--deepl` 翻譯後，每筆 `definition_zh` 可手動回寫至 `word-cache-zh.json`，讓未來其他書的同一詞彙直接讀快取而不需重翻。  
+也可將已有快取的空白列自動補填：
+
+```bash
+# 單一 CSV 雙向同步
+npx ts-node src/index.ts output/novel-beginner-words.csv --fill-def-zh
+
+# 整目錄批次同步
+npx ts-node src/index.ts output/ --fill-def-zh
+```
+
+執行後輸出三類統計（與 `--fill-sent-zh` 格式相同）：
+- **存入快取**：CSV 中已有 `definition_zh` 的列，寫入 `word-cache-zh.json`（key: `lemma:pos`）
+- **補填 CSV**：CSV 中原本空白、快取命中的列，填入翻譯並更新 CSV 檔案
+- **略過**：lemma 為空，或快取中找不到對應翻譯的列
 
 ## 匯入 Anki
 
