@@ -4,8 +4,12 @@ import { fillVocabTranslationsFromCache } from '../../cards/translationFiller';
 import { getWordCache } from '../../nlp/wordCache';
 import { GeneratedCards } from '../../cards/types';
 
-const mockGetChinese = jest.fn<string | null, [string, string | null]>();
-(getWordCache as jest.Mock).mockReturnValue({ getChinese: mockGetChinese });
+const mockGetChinese    = jest.fn<string | null, [string, string | null]>();
+const mockGetSentenceZh = jest.fn<string | null, [string]>();
+(getWordCache as jest.Mock).mockReturnValue({
+  getChinese:    mockGetChinese,
+  getSentenceZh: mockGetSentenceZh,
+});
 
 function makeCards(overrides: Partial<GeneratedCards> = {}): GeneratedCards {
   return { vocab: [], cloze: [], character: [], plot: [], ...overrides };
@@ -13,6 +17,7 @@ function makeCards(overrides: Partial<GeneratedCards> = {}): GeneratedCards {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetSentenceZh.mockReturnValue(null); // 預設不命中
 });
 
 // ── fillVocabTranslationsFromCache ────────────────────────────────────────────
@@ -94,5 +99,59 @@ describe('fillVocabTranslationsFromCache', () => {
     // When / Then: no throw
     expect(() => fillVocabTranslationsFromCache(cards)).not.toThrow();
     expect(mockGetChinese).not.toHaveBeenCalled();
+  });
+});
+
+// ── fillVocabTranslationsFromCache — exampleZh ────────────────────────────────
+
+describe('fillVocabTranslationsFromCache — exampleZh', () => {
+  it('should fill missing exampleZh from sentence cache', () => {
+    // Given
+    mockGetSentenceZh.mockReturnValue('他跑得很快。');
+    const cards = makeCards({
+      vocab: [{ type: 'vocab', word: 'run', definition_zh: '跑', exampleFromText: 'He ran fast.' }],
+    });
+    // When
+    fillVocabTranslationsFromCache(cards);
+    // Then
+    expect(cards.vocab[0].exampleZh).toBe('他跑得很快。');
+    expect(mockGetSentenceZh).toHaveBeenCalledWith('He ran fast.');
+  });
+
+  it('should NOT overwrite existing exampleZh', () => {
+    // Given
+    mockGetSentenceZh.mockReturnValue('快取例句翻譯');
+    const cards = makeCards({
+      vocab: [{ type: 'vocab', word: 'run', definition_zh: '跑', exampleFromText: 'He ran fast.', exampleZh: '已有翻譯' }],
+    });
+    // When
+    fillVocabTranslationsFromCache(cards);
+    // Then
+    expect(cards.vocab[0].exampleZh).toBe('已有翻譯');
+    expect(mockGetSentenceZh).not.toHaveBeenCalled();
+  });
+
+  it('should leave exampleZh unset when sentence cache has no entry', () => {
+    // Given: getSentenceZh returns null
+    const cards = makeCards({
+      vocab: [{ type: 'vocab', word: 'run', definition_zh: '跑', exampleFromText: 'He ran fast.' }],
+    });
+    // When
+    fillVocabTranslationsFromCache(cards);
+    // Then
+    expect(cards.vocab[0].exampleZh).toBeUndefined();
+  });
+
+  it('should pass the exact exampleFromText as the lookup key', () => {
+    // Given
+    const sentence = 'The chapter began with a dark mystery.';
+    mockGetSentenceZh.mockReturnValue('這章以黑暗謎團開始。');
+    const cards = makeCards({
+      vocab: [{ type: 'vocab', word: 'chapter', definition_zh: '章節', exampleFromText: sentence }],
+    });
+    // When
+    fillVocabTranslationsFromCache(cards);
+    // Then
+    expect(mockGetSentenceZh).toHaveBeenCalledWith(sentence);
   });
 });

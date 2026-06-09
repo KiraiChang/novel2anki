@@ -324,4 +324,74 @@ describe('WordCacheManager', () => {
       expect(wc.cacheSize).toBe(1);
     });
   });
+
+  // ── sentence cache ────────────────────────────────────────────────────────────
+
+  describe('setSentenceZh / getSentenceZh', () => {
+    it('should return null for unknown sentence', () => {
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.getSentenceZh('He ran fast.')).toBeNull();
+    });
+
+    it('should return stored translation for exact sentence', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran fast.', '他跑得很快。');
+      // When / Then
+      expect(wc.getSentenceZh('He ran fast.')).toBe('他跑得很快。');
+    });
+
+    it('should treat different sentences as different keys', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran fast.', '他跑得很快。');
+      wc.setSentenceZh('She walked slowly.', '她走得很慢。');
+      // When / Then
+      expect(wc.getSentenceZh('He ran fast.')).toBe('他跑得很快。');
+      expect(wc.getSentenceZh('She walked slowly.')).toBe('她走得很慢。');
+    });
+
+    it('should persist to sentence-cache.json after flush and reload', () => {
+      // Given
+      const wc1 = new WordCacheManager(tmpDir);
+      wc1.setSentenceZh('The chapter began.', '這章開始了。');
+      wc1.flush();
+      // When
+      const wc2 = new WordCacheManager(tmpDir);
+      // Then
+      expect(wc2.getSentenceZh('The chapter began.')).toBe('這章開始了。');
+    });
+
+    it('should store en and zh in sentence-cache.json', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran fast.', '他跑得很快。');
+      wc.flush();
+      // When
+      const raw = JSON.parse(fs.readFileSync(
+        path.join(tmpDir, 'sentence-cache.json'), 'utf-8',
+      )) as Record<string, { en: string; zh: string }>;
+      const entries = Object.values(raw);
+      // Then
+      expect(entries).toHaveLength(1);
+      expect(entries[0].en).toBe('He ran fast.');
+      expect(entries[0].zh).toBe('他跑得很快。');
+    });
+
+    it('should NOT write file when no setSentenceZh was called (dirty flag)', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.flush();
+      // Then: file should not exist (no write happened)
+      expect(fs.existsSync(path.join(tmpDir, 'sentence-cache.json'))).toBe(false);
+    });
+
+    it('should increment sentenceCacheSize correctly', () => {
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.sentenceCacheSize).toBe(0);
+      wc.setSentenceZh('sent1', 'zh1');
+      wc.setSentenceZh('sent2', 'zh2');
+      expect(wc.sentenceCacheSize).toBe(2);
+    });
+  });
 });

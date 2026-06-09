@@ -452,11 +452,19 @@ export async function translateBeginnerWordsCsv(
     }
   });
 
+  // 例句翻譯存入 sentence cache
+  const wc = getWordCache();
+  needTranslation.forEach(({ }, j) => {
+    const enSent = sentences[j];
+    const zhSent = sentZh[j];
+    if (enSent && zhSent) wc.setSentenceZh(enSent, zhSent);
+  });
+
   // 寫回檔案
   const headerLine = headers.map(escapeField).join(',');
   const dataLines = rows.map(cols => cols.map(escapeField).join(','));
   fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
-  getWordCache().flush();
+  wc.flush();
   onProgress?.(1, 1, 'write');
 
   return { translatedCount: needTranslation.length, skippedCount, outputPath: csvPath };
