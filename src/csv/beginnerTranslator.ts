@@ -340,7 +340,7 @@ export function formatBeginnerTranslateEstimate(est: BeginnerTranslateEstimate):
 
   const sep = '─'.repeat(44);
   const rows = [
-    `DeepL 初學者翻譯預估`,
+    `初學者翻譯預估`,
     sep,
     `未翻譯詞彙：  ${untranslatedCount.toLocaleString()} 個`,
     `例句字元：    ${sentenceChars.toLocaleString()} 字元`,
@@ -383,9 +383,14 @@ export async function translateBeginnerWordsCsv(
   const rows = lines.slice(1).map(l => parseRow(l));
 
   // 找出需要翻譯的列索引（force 模式對全部列重新翻譯）
+  // 條件：definition_zh 或 context_sentence_zh 任一為空，均需翻譯
   const needTranslation = rows
     .map((cols, i) => ({ i, cols }))
-    .filter(({ cols }) => options?.force || !get(cols, 'definition_zh').trim());
+    .filter(({ cols }) =>
+      options?.force ||
+      !get(cols, 'definition_zh').trim() ||
+      !get(cols, 'context_sentence_zh').trim(),
+    );
 
   const skippedCount = rows.length - needTranslation.length;
   if (needTranslation.length === 0) {
@@ -446,7 +451,9 @@ export async function translateBeginnerWordsCsv(
     while (rows[i].length <= Math.max(defZhColIdx ?? 0, sentZhColIdx ?? 0)) {
       rows[i].push('');
     }
-    if (defZhColIdx !== undefined) rows[i][defZhColIdx] = defZh[j] ?? '';
+    if (defZhColIdx !== undefined && (options?.force || !rows[i][defZhColIdx]?.trim())) {
+      rows[i][defZhColIdx] = defZh[j] ?? '';
+    }
     if (sentZhColIdx !== undefined && (options?.force || !rows[i][sentZhColIdx]?.trim())) {
       rows[i][sentZhColIdx] = sentZh[j] ?? '';
     }
