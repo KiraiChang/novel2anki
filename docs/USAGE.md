@@ -263,7 +263,13 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 ### 工作流程
 
 `--beginner` 掃描完成後，除了 CSV 外，還會輸出 `*-beginner-names.txt`（人名與專有名詞清單）。  
-可在翻譯前開啟確認 / 新增 / 刪除，翻譯時自動讀取，防止人名被 DeepL 誤譯（例如 "Pony" → "小馬"）。
+可在翻譯前開啟確認 / 新增 / 刪除，翻譯時自動讀取，防止人名被翻譯後端誤譯（例如 "Pony" → "小馬"）。
+
+名稱檔支援兩種格式：
+- **只保護**（翻譯後保留英文原名）：每行只寫英文名，例如 `Elbryan`
+- **指定音譯**（翻譯後替換為中文）：`英文名: 中文音譯`，例如 `Markwart: 馬克瓦特`
+
+> 宗教頭銜（Father、Abbot、Brother…）、軍事頭銜（Captain、General、Colonel…）、封建稱謂（King、Queen、Sir…）等已內建排除，**不會出現在人名表中**，翻譯後端會直接翻譯這些詞（如「神父」「隊長」「國王」）。
 
 #### 手動翻譯
 
@@ -275,8 +281,8 @@ npx ts-node src/index.ts novel.epub --beginner
 #   output/novel-beginner-names.txt   ← 人名表（可手動編輯）
 
 # Step 1.5（選用）：開啟 *-beginner-names.txt 確認人名清單
-#   - 刪除誤判的通稱（Brother、Captain 等）
 #   - 補充偵測漏掉的奇幻人名
+#   - 為角色名加上中文音譯：Elbryan: 艾爾布萊恩
 
 # Step 2：填入 *-beginner-words.csv 的 definition_zh 欄位
 #         （可選填 context_sentence_zh 補充例句中文翻譯）
@@ -296,6 +302,8 @@ npx ts-node src/index.ts novel.epub --beginner
 # 或分割版（每 100 個詞一個 CSV）
 npx ts-node src/index.ts novel.epub --beginner --beginner-split 100
 # 輸出：output/novel-beginner-names.txt  ← 可在此時編輯
+#   加入音譯：Markwart: 馬克瓦特
+#   補充漏掉的人名：Elbryan
 
 # Step 2：整目錄翻譯（自動讀取 *-beginner-names.txt 保護人名）
 #         每次執行前顯示費用估算，輸入 [Y/n] 確認後才送出
@@ -327,7 +335,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
 | `*-beginner-words.csv` | 9 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
 | `*-beginner-words-part-NN.csv` | 9 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
-| `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--translate` 自動讀取 |
+| `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--translate` 自動讀取。支援兩種格式：`Elbryan`（保留英文原名）或 `Markwart: 馬克瓦特`（指定中文音譯） |
 
 **words CSV 欄位**（9 欄）：
 

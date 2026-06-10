@@ -112,7 +112,7 @@ beginnerExporter.ts
       → 統計未翻譯列數（force 時計全部）、字元量、費用預估
 
     translateBeginnerWordsCsv(csvPath, config, onProgress, { force?, prebuiltNames? })
-      prebuiltNames: 從 *-beginner-names.txt 讀入的 Set<string>（優先使用）
+      prebuiltNames: 從 *-beginner-names.txt 讀入的 Map<string, string>（key=英文名, value=中文音譯或空字串；優先使用）
       若未傳入則從本批句子動態偵測（backward compat fallback）
 
       Phase 1 — 字典查詢（三層查找：word-dict → word-cache → MW API）
@@ -131,19 +131,23 @@ beginnerExporter.ts
              → getWordCache().setCache(word, pos, def, source)
           若 CSV 中 definition_en 已填寫（--mw 預查或手動填入）→ 直接使用，跳過 API
 
-      Phase 2 — DeepL 批次翻譯（目標語言：zh-HANT 繁體中文）
+      Phase 2 — 批次翻譯（目標語言：zh-HANT 繁體中文）
         NER 人名保護（翻譯前）：
           優先使用 prebuiltNames（讀自 *-beginner-names.txt，使用者可確認修改）
+            properNouns = new Set(prebuiltNames.keys())（保護集從 Map keys 取得）
           無 prebuiltNames 時動態建：
             buildProperNounSet(sentences)
               ↳ compromise .people() + #ProperNoun，以及 mid-sentence 大寫詞（從索引 1 起）
+              ↳ NAME_SKIP 以小寫儲存（代名詞 he/she/his/her/they/their 等 + 宗教/軍事/封建頭銜 Father/Abbot/Captain/King 等），比對時統一 .toLowerCase()
               ↳ 跨句共享名詞集：「Pony」在任一句中段出現 → 同批所有句子（含句首）都保護
           protectNames(sentence, nouns) → 替換為 __PERSON_0__、__PERSON_1__… + 還原表
         交錯排列送入：[def1, protected_sent1, def2, protected_sent2, …]
-        ↳ 定義與對應例句相鄰 → DeepL 翻譯 def_i 時以 sent_i 作語境，選出正確詞義
+        ↳ 定義與對應例句相鄰 → 翻譯 def_i 時以 sent_i 作語境，選出正確詞義
         每批次 50 筆（= 25 組詞對），batchTranslateChunked 循序累積
         NER 還原（翻譯後）：
-          restoreNames(translated, restoreMap) → __PERSON_N__ 換回原始人名
+          restoreNames(translated, restoreMap, prebuiltNames)
+            ↳ 有中文音譯（prebuiltNames.get(original) 非空）→ 替換為中文（如「馬克瓦特」）
+            ↳ 無中文音譯（空字串）→ 還原為英文原名
         結果拆分：偶數索引 → defZh[]；奇數索引 → sentZh[]（已還原人名）
 
       Phase 3 — 寫回 CSV
@@ -209,7 +213,7 @@ beginnerExporter.ts
 | 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（9 欄，含 `definition_en` 預查欄）+ 分割版 words CSV + `*-beginner-names.txt`（人名表） |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
-| NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫）、`protectNames()` / `restoreNames()`（`__PERSON_N__` 佔位符）、`saveNamesFile()` / `loadNamesFile()`（純文字 I/O） |
+| NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫；`NAME_SKIP` 小寫儲存，涵蓋代名詞、宗教/軍事/封建頭銜）、`protectNames()` / `restoreNames(translated, restoreMap, translationMap?)`（`__PERSON_N__` 佔位符；有 translationMap 時優先替換為中文音譯，否則還原英文原名）、`saveNamesFile()`（保留現有 mapping，只補新名詞）/ `loadNamesFile()`（回傳 `Map<string, string>`，支援 `English: 中文` 或純英文格式） |
 | 翻譯管線 | `src/csv/beginnerTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 寫回 CSV（`definition_zh` 空白才寫入；`context_sentence_zh` 空白或 force 才寫入）；例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath, onProgress?, config?)`：雙向同步 `definition_zh` 與 `definition_en` ↔ 分層快取（book → domain → global）；`FillDefZhConfig { domain?, book? }` 控制啟用哪些層；zh 全局寫入限定 CEFR 已知詞（`setChinese`），en 全局寫入同條件（`setCache`）；book / domain zh 採 `setIfEmpty`，en 採 `setEnIfEmpty`（均不覆寫既有條目）；en cache → CSV fallback 使用 `wc.get(lemma, pos)?.def` |
 | 翻譯補填 | `src/cards/translationFiller.ts` | `fillVocabTranslationsFromCache(cards, onProgress?)`：對所有 `VocabCard` 補填缺失欄位——`definition_zh` 空時查 `word-cache-zh.json`，`exampleZh` 空時查 `sentence-cache.json`；已有內容不覆寫。回傳 `FillResult { definitionFilled, exampleFilled }`。`onProgress(current, total)` 回呼供 CLI 即時進度顯示。beginner words / beginner tokens / CSV import / 主流程等 4 個輸出路徑均在輸出前呼叫 |
 | 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku） |
