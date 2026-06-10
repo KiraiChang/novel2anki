@@ -6,6 +6,16 @@ const CONTENT_POS = new Set([
   'Plural', 'Singular', 'Infinitive', 'PastTense', 'Gerund',
 ]);
 
+// 語意介系詞白名單：這些介系詞帶有明確方位/關係語意，初學者值得學習。
+// stopWords 已排除 about/into/over/around/through/within/without/during/despite/toward/upon 等，
+// 此處只列出 stopWords 未涵蓋、需主動保留的語意介系詞。
+const SEMANTIC_PREPOSITIONS = new Set([
+  'against', 'amid', 'amidst', 'beneath', 'beyond',
+  'beside', 'besides', 'except', 'unlike', 'via',
+  'across', 'along', 'among', 'amongst', 'opposite',
+  'underneath', 'versus',
+]);
+
 export interface FilterOptions {
   includeA1?: boolean;
   minFreq?: number;
@@ -42,7 +52,8 @@ export function applyBeginnerFilters(
       reason = 'not-A1';
     } else if (entry.globalCount < minFreq) {
       reason = 'not-hapax';
-    } else if (!CONTENT_POS.has(entry.pos)) {
+    } else if (!CONTENT_POS.has(entry.pos) &&
+               !(entry.pos === 'Preposition' && SEMANTIC_PREPOSITIONS.has(entry.lemma))) {
       reason = 'content-pos';
     } else if (isProperNoun) {
       reason = 'proper-noun';
