@@ -52,9 +52,10 @@ npx ts-node src/index.ts <輸入> [選項]
   --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
   --prefetch-phrases      批次預查片語庫（1409 個片語）MW 英文定義，存入 phrase-cache.json（需設定 MW_API_KEY；命中與查無結果均快取）
   --fill-sent-zh          雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填
-  --fill-def-zh [layers]  雙向同步詞彙中文定義。layers 格式：domain 或 domain,book
+  --fill-def-zh [layers]  雙向同步詞彙定義（definition_zh 與 definition_en）。layers 格式：domain 或 domain,book
                           （例：--fill-def-zh=fantasy 或 --fill-def-zh=fantasy,the-demon-awakens）
-                          未指定時只同步全局快取（CEFR 已知詞才寫入 global）
+                          未指定時只同步全局快取（zh: word-cache-zh.json；en: word-cache.json）
+                          CEFR 已知詞才寫入 global；UNKNOWN 詞寫入 domain/book 分層快取
 ```
 
 ## 使用範例
@@ -429,8 +430,10 @@ Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬�
 | `word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
 | `word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
 | `word-cache-zh.json` | 翻譯後的繁體中文定義（CEFR 已知詞） | `--prefetch-cefr-zh` 或 `--fill-def-zh` |
-| `domain_{name}_cache_zh.json` | domain 專屬中文定義快取（含 UNKNOWN 詞） | `--fill-def-zh=domain` 寫回時建立 |
-| `book_{name}_cache_zh.json` | book 專屬中文定義快取（含 UNKNOWN 詞） | `--fill-def-zh=domain,book` 寫回時建立 |
+| `domain_{name}_cache_zh.json` | domain 專屬中文定義快取（含 UNKNOWN 詞，`{zh, source}`） | `--fill-def-zh=domain` 寫回時建立 |
+| `domain_{name}_cache.json` | domain 專屬英文定義快取（含 UNKNOWN 詞，`{def, source}`） | `--fill-def-zh=domain` 寫回時建立（en cache） |
+| `book_{name}_cache_zh.json` | book 專屬中文定義快取（含 UNKNOWN 詞，`{zh, source}`） | `--fill-def-zh=domain,book` 寫回時建立 |
+| `book_{name}_cache.json` | book 專屬英文定義快取（含 UNKNOWN 詞，`{def, source}`） | `--fill-def-zh=domain,book` 寫回時建立（en cache） |
 | `sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--translate` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
 | `cefr-wordlist.json` | CEFR 字庫（5,732 詞，A1–C2） | `scripts/build-cefr.js` 產生；若存在則優先讀此處 |
 | `phrase-list.json` | 學術／常見片語庫（1,409 條，含 OPAL / OPL 來源） | `scripts/extract-phrase-lists.py` 產生；若存在則優先讀此處 |
@@ -456,23 +459,34 @@ npx ts-node src/index.ts output/ --fill-sent-zh
 
 ## 詞彙定義快取（`--fill-def-zh`）
 
-`--translate` 翻譯後，每筆 `definition_zh` 可雙向同步至快取，讓未來其他書的同一詞彙直接讀快取而不需重翻。
+`--translate` 翻譯後，每筆 `definition_zh` 與 `definition_en` 可同時雙向同步至快取：
+- **zh**：同步 `definition_zh` ↔ `word-cache-zh.json`（全局）/ `*_cache_zh.json`（分層）
+- **en**：同步 `definition_en` ↔ `word-cache.json`（全局）/ `*_cache.json`（分層）
+
+讓未來其他書的同一詞彙直接讀快取而不需重翻，也能從已有 MW 定義的 `word-cache.json` 填回 `definition_en`。
 
 ### 基本用法（全局快取）
 
 ```bash
-# 單一 CSV 雙向同步（全局 word-cache-zh.json）
+# 單一 CSV 雙向同步（zh: word-cache-zh.json；en: word-cache.json）
 npx ts-node src/index.ts output/novel-beginner-words.csv --fill-def-zh
 
 # 整目錄批次同步
 npx ts-node src/index.ts output/ --fill-def-zh
 ```
 
-**全局快取寫入規則**：CEFR level 已知（非 UNKNOWN）的詞才寫入 `word-cache-zh.json`。Fantasy 自創詞（dactyl、centaur 等 CEFR=UNKNOWN）不寫入全局快取，避免書本特有詞彙污染全局庫。
+**兩層寫入條件互斥**（zh 與 en 均適用相同規則）：
+
+| 快取 | 寫入條件 | 目的 |
+|------|---------|------|
+| `word-cache-zh.json` / `word-cache.json`（global） | CEFR level 已知（非 UNKNOWN） | 通用詞彙（A1–C2），跨書共用 |
+| `domain_*/book_*_cache_zh.json` / `*_cache.json` | CEFR UNKNOWN（不在 CEFR 字庫） | 領域/書本特有詞（自創詞、角色名等） |
+
+兩層互補不重疊：CEFR 已知的詞只進 global，UNKNOWN 詞只進 domain/book。
 
 ### 分層快取（`--fill-def-zh=domain` 或 `=domain,book`）
 
-指定 domain 或 book 後，會額外操作 domain / book 專屬快取，適合同系列或同類型書籍共用術語翻譯。
+指定 domain 或 book 後，會額外操作 domain / book 專屬快取，適合同系列或同類型書籍共用領域特有詞彙的翻譯。
 
 ```bash
 # 只用 domain 快取（奇幻類型通用）
@@ -486,15 +500,14 @@ npx ts-node src/index.ts output/ --fill-def-zh=fantasy,the-demon-awakens
 ```
 book cache → domain cache → global cache
 ```
-
-**寫回規則**（CSV → cache）：
-- book / domain cache：只要 key 尚無值就寫入（無 CEFR 限制）
-- global cache：只有 CEFR level 已知的詞才寫入（同基本用法）
+三層均參與查詢。UNKNOWN 詞通常只在 domain/book 找到；CEFR 已知詞通常只在 global 找到。
 
 **快取檔案**（與全局快取放同一目錄 `~/.novel2anki/`）：
 ```
-domain_fantasy_cache_zh.json
-book_the-demon-awakens_cache_zh.json
+domain_fantasy_cache_zh.json          ← 中文定義（CEFR UNKNOWN 詞，奇幻通用）
+domain_fantasy_cache.json             ← 英文定義（CEFR UNKNOWN 詞，奇幻通用）
+book_the-demon-awakens_cache_zh.json  ← 中文定義（CEFR UNKNOWN 詞，本書專屬）
+book_the-demon-awakens_cache.json     ← 英文定義（CEFR UNKNOWN 詞，本書專屬）
 ```
 
 > **注意**：只指定 `--fill-def-zh=fantasy`（無 book）時，book 快取完全不參與。若之前已用 `--fill-def-zh=fantasy,book1` 建立了 book1 快取，改用 `--fill-def-zh=fantasy` 不會讀到 book1 的資料，屬預期行為。
@@ -502,10 +515,10 @@ book_the-demon-awakens_cache_zh.json
 ### 輸出統計
 
 三類統計（與 `--fill-sent-zh` 格式相同）：
-- **存入快取**：CSV 中已有 `definition_zh` 的列，成功寫入任一層快取
-- **略過（已有）**：全部目標層快取皆已有此詞條目，未寫入
-- **補填 CSV**：CSV 中原本空白、任一層快取命中的列，填入翻譯並更新 CSV 檔案
-- **略過（無快取）**：lemma 為空，或各層快取均找不到對應翻譯的列
+- **存入快取**：`definition_zh` 或 `definition_en`（或兩者）成功寫入任一層快取的列數
+- **略過（已有）**：欄位不為空、但全部目標層快取皆已有此詞條目的列數
+- **補填 CSV**：`definition_zh` 或 `definition_en`（或兩者）原本空白、任一層快取命中並填入的列數
+- **略過（無快取）**：lemma 為空，或兩欄均空白且各層快取均找不到的列數
 
 ## 匯入 Anki
 

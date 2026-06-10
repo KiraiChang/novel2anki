@@ -292,22 +292,42 @@ export function getWordCache(): WordCacheManager {
 
 // ── domain / book 定義翻譯分層快取 ───────────────────────────────────────────
 
-/** domain 或 book 專屬的中文定義快取，格式與 word-cache-zh.json 相同（key: word:pos 或 word）
- *  - 檔案命名：`{type}_{name}_cache_zh.json`，存放於 global cache 同目錄
- *  - setIfEmpty：已有值則不覆寫（由呼叫方負責冪等寫回）
+/** domain 或 book 專屬的雙語定義快取：
+ *  - zh 檔：`{type}_{name}_cache_zh.json`，結構同 word-cache-zh.json（CacheZhEntry）
+ *  - en 檔：`{type}_{name}_cache.json`，結構同 word-cache.json（CacheEntry）
+ *  - 存放於 global cache 同目錄
+ *  - setIfEmpty / setEnIfEmpty：已有值則不覆寫（由呼叫方負責冪等寫回）
  */
 export class DefinitionLayerCache {
-  private readonly data: Record<string, string> = {};
-  private dirty = false;
-  readonly filePath: string;
+  private readonly zhData: Record<string, CacheZhEntry> = {};
+  private readonly enData: Record<string, CacheEntry>   = {};
+  private zhDirty = false;
+  private enDirty = false;
+  readonly filePath: string;    // zh 快取路徑（domain_{name}_cache_zh.json）
+  readonly enFilePath: string;  // en 快取路徑（domain_{name}_cache.json）
 
   constructor(cacheDir: string, type: 'domain' | 'book', name: string) {
-    this.filePath = path.join(cacheDir, `${type}_${name}_cache_zh.json`);
+    this.filePath   = path.join(cacheDir, `${type}_${name}_cache_zh.json`);
+    this.enFilePath = path.join(cacheDir, `${type}_${name}_cache.json`);
     try {
       if (fs.existsSync(this.filePath)) {
         const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as Record<string, unknown>;
         for (const [k, v] of Object.entries(raw)) {
-          if (typeof v === 'string') this.data[k] = v;
+          if (typeof v === 'string') {
+            this.zhData[k] = { zh: v, source: 'legacy' };  // 向下相容舊格式
+          } else if (v && typeof v === 'object' && 'zh' in v) {
+            this.zhData[k] = v as CacheZhEntry;
+          }
+        }
+      }
+    } catch { /* 損壞時從空白開始 */ }
+    try {
+      if (fs.existsSync(this.enFilePath)) {
+        const raw = JSON.parse(fs.readFileSync(this.enFilePath, 'utf-8')) as Record<string, unknown>;
+        for (const [k, v] of Object.entries(raw)) {
+          if (v && typeof v === 'object' && 'def' in v) {
+            this.enData[k] = v as CacheEntry;
+          }
         }
       }
     } catch { /* 損壞時從空白開始 */ }
@@ -319,24 +339,48 @@ export class DefinitionLayerCache {
   }
 
   get(word: string, pos?: string | null): string | null {
-    return this.data[this.key(word, pos)] ?? this.data[this.key(word)] ?? null;
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.zhData[exact]?.zh ?? this.zhData[base]?.zh ?? null;
   }
 
-  /** 若 key 尚無值則寫入，回傳是否實際寫入 */
-  setIfEmpty(word: string, pos: string | null | undefined, zh: string): boolean {
+  /** 若 key 尚無中文定義則寫入，回傳是否實際寫入 */
+  setIfEmpty(word: string, pos: string | null | undefined, zh: string, source = 'csv'): boolean {
     const k = this.key(word, pos);
-    if (this.data[k]) return false;
-    this.data[k] = zh;
-    this.dirty = true;
+    if (this.zhData[k]) return false;
+    this.zhData[k] = { zh, source };
+    this.zhDirty = true;
+    return true;
+  }
+
+  getEn(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.enData[exact]?.def ?? this.enData[base]?.def ?? null;
+  }
+
+  /** 若 key 尚無英文定義則寫入，回傳是否實際寫入 */
+  setEnIfEmpty(word: string, pos: string | null | undefined, def: string, source = 'mw'): boolean {
+    const k = this.key(word, pos);
+    if (this.enData[k]) return false;
+    this.enData[k] = { def, source };
+    this.enDirty = true;
     return true;
   }
 
   flush(): void {
-    if (!this.dirty) return;
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8');
-    this.dirty = false;
+    if (this.zhDirty) {
+      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+      fs.writeFileSync(this.filePath, JSON.stringify(this.zhData, null, 2), 'utf-8');
+      this.zhDirty = false;
+    }
+    if (this.enDirty) {
+      fs.mkdirSync(path.dirname(this.enFilePath), { recursive: true });
+      fs.writeFileSync(this.enFilePath, JSON.stringify(this.enData, null, 2), 'utf-8');
+      this.enDirty = false;
+    }
   }
 
-  get size(): number { return Object.keys(this.data).length; }
+  get size(): number   { return Object.keys(this.zhData).length; }
+  get enSize(): number { return Object.keys(this.enData).length; }
 }

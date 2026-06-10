@@ -624,15 +624,16 @@ export interface FillDefZhConfig {
 }
 
 /**
- * 雙向同步詞彙中文定義（支援 domain / book 分層快取）：
+ * 雙向同步詞彙定義（definition_zh 與 definition_en，支援 domain / book 分層快取）：
  *
- * CSV → cache（definition_zh 不為空）：
- *   - book / domain cache：有指定時，key 尚無值才寫入（setIfEmpty）
- *   - global cache：CEFR level 已知（非 UNKNOWN）且 key 尚無值才寫入
+ * CSV → cache（欄位不為空）：
+ *   - zh：book / domain cache setIfEmpty；global cache CEFR 已知才寫入
+ *   - en：book / domain en cache setEnIfEmpty；global word-cache.json CEFR 已知且無現有條目才寫入
+ *   - 兩者均僅對 CEFR UNKNOWN 詞寫入 domain/book，與 global 互補不重疊
  *
- * cache → CSV（definition_zh 為空）：
- *   - 查詢順序：book → domain → global
- *   - 有指定 book/domain 時，仍以 global 作為最終 fallback
+ * cache → CSV（欄位為空）：
+ *   - 查詢順序：book → domain → global（zh 查 getChinese，en 查 get()/getEn()）
+ *   - global 永遠作最終 fallback
  *
  * 若有任何 CSV 更新，自動寫回檔案。
  */
@@ -653,6 +654,7 @@ export function syncDefinitionCacheWithCsv(
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
   const defZhColIdx = idx['definition_zh'];
+  const defEnColIdx = idx['definition_en'];
   if (defZhColIdx === undefined) {
     return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
@@ -671,6 +673,7 @@ export function syncDefinitionCacheWithCsv(
     const lemma     = get(rows[i], 'lemma').trim();
     const pos       = get(rows[i], 'pos').trim() || null;
     const defZh     = get(rows[i], 'definition_zh').trim();
+    const defEn     = defEnColIdx !== undefined ? get(rows[i], 'definition_en').trim() : '';
     const cefrLevel = get(rows[i], 'cefr_level').trim();
 
     if (!lemma) {
@@ -679,29 +682,22 @@ export function syncDefinitionCacheWithCsv(
       continue;
     }
 
+    const cefrKnown = cefrLevel && cefrLevel !== 'UNKNOWN';
+    let wroteAny  = false;
+    let filledAny = false;
+
+    // ── zh：CSV → cache ──────────────────────────────────────────────────────
     if (defZh) {
-      // CSV → cache
-      let wroteAny = false;
-
-      if (bookCache)   wroteAny = bookCache.setIfEmpty(lemma, pos, defZh)   || wroteAny;
-      if (domainCache) wroteAny = domainCache.setIfEmpty(lemma, pos, defZh) || wroteAny;
-
-      // global：只有 CEFR 有 level 的詞才寫入
-      const cefrKnown = cefrLevel && cefrLevel !== 'UNKNOWN';
+      if (!cefrKnown) {
+        if (bookCache)   wroteAny = bookCache.setIfEmpty(lemma, pos, defZh)   || wroteAny;
+        if (domainCache) wroteAny = domainCache.setIfEmpty(lemma, pos, defZh) || wroteAny;
+      }
       if (cefrKnown && !wc.getChinese(lemma, pos)) {
         wc.setChinese(lemma, pos, defZh, 'csv');
         wroteAny = true;
       }
-
-      if (wroteAny) {
-        savedToCache++;
-        onProgress?.(i + 1, rows.length, 'saved');
-      } else {
-        skippedCache++;
-        onProgress?.(i + 1, rows.length, 'skip');
-      }
     } else {
-      // cache → CSV：book → domain → global
+      // ── zh：cache → CSV ────────────────────────────────────────────────────
       let cached: string | null = null;
       if (bookCache)   cached ??= bookCache.get(lemma, pos);
       if (domainCache) cached ??= domainCache.get(lemma, pos);
@@ -710,13 +706,49 @@ export function syncDefinitionCacheWithCsv(
       if (cached) {
         while (rows[i].length <= defZhColIdx) rows[i].push('');
         rows[i][defZhColIdx] = cached;
-        filledFromCache++;
-        csvDirty = true;
-        onProgress?.(i + 1, rows.length, 'filled');
-      } else {
-        noMatch++;
-        onProgress?.(i + 1, rows.length, 'skip');
+        filledAny = true;
+        csvDirty  = true;
       }
+    }
+
+    // ── en：CSV → cache ──────────────────────────────────────────────────────
+    if (defEn && defEnColIdx !== undefined) {
+      if (!cefrKnown) {
+        if (bookCache)   wroteAny = bookCache.setEnIfEmpty(lemma, pos, defEn)   || wroteAny;
+        if (domainCache) wroteAny = domainCache.setEnIfEmpty(lemma, pos, defEn) || wroteAny;
+      }
+      if (cefrKnown && !wc.get(lemma, pos)) {
+        wc.setCache(lemma, pos, defEn, 'csv');
+        wroteAny = true;
+      }
+    } else if (defEnColIdx !== undefined) {
+      // ── en：cache → CSV ────────────────────────────────────────────────────
+      let cachedEn: string | null = null;
+      if (bookCache)   cachedEn ??= bookCache.getEn(lemma, pos);
+      if (domainCache) cachedEn ??= domainCache.getEn(lemma, pos);
+      cachedEn ??= wc.get(lemma, pos)?.def ?? null;
+
+      if (cachedEn) {
+        while (rows[i].length <= defEnColIdx) rows[i].push('');
+        rows[i][defEnColIdx] = cachedEn;
+        filledAny = true;
+        csvDirty  = true;
+      }
+    }
+
+    // ── counters ─────────────────────────────────────────────────────────────
+    if (wroteAny) {
+      savedToCache++;
+      onProgress?.(i + 1, rows.length, 'saved');
+    } else if (filledAny) {
+      filledFromCache++;
+      onProgress?.(i + 1, rows.length, 'filled');
+    } else if (defZh || defEn) {
+      skippedCache++;
+      onProgress?.(i + 1, rows.length, 'skip');
+    } else {
+      noMatch++;
+      onProgress?.(i + 1, rows.length, 'skip');
     }
   }
 

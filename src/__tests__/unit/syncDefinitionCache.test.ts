@@ -14,6 +14,8 @@ import { getWordCache } from '../../nlp/wordCache';
 
 const mockSetChinese = jest.fn<void, [string, string | null, string, string]>();
 const mockGetChinese = jest.fn<string | null, [string, string | null]>();
+const mockGet        = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
+const mockSetCache   = jest.fn<void, [string, string | null, string, string]>();
 const mockFlush      = jest.fn<void, []>();
 
 let mockCacheDir: string;
@@ -21,6 +23,8 @@ let mockCacheDir: string;
 (getWordCache as jest.Mock).mockImplementation(() => ({
   setChinese: mockSetChinese,
   getChinese: mockGetChinese,
+  get:        mockGet,
+  setCache:   mockSetCache,
   flush:      mockFlush,
   get cacheDir() { return mockCacheDir; },
 }));
@@ -58,6 +62,11 @@ function readDefZh(csvPath: string): string[] {
   return lines.slice(1).map(l => l.split(',').map(f => f.replace(/^"|"$/g, ''))[8]);
 }
 
+function readDefEn(csvPath: string): string[] {
+  const lines = fs.readFileSync(csvPath, 'utf-8').trim().split('\n');
+  return lines.slice(1).map(l => l.split(',').map(f => f.replace(/^"|"$/g, ''))[5]);
+}
+
 // ── テスト ────────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -67,10 +76,13 @@ beforeEach(() => {
   mockCacheDir = tmpDir;
   jest.clearAllMocks();
   mockGetChinese.mockReturnValue(null);
+  mockGet.mockReturnValue(null);
   // re-apply implementation after clearAllMocks
   (getWordCache as jest.Mock).mockImplementation(() => ({
     setChinese: mockSetChinese,
     getChinese: mockGetChinese,
+    get:        mockGet,
+    setCache:   mockSetCache,
     flush:      mockFlush,
     get cacheDir() { return mockCacheDir; },
   }));
@@ -278,21 +290,23 @@ describe('syncDefinitionCacheWithCsv — domain cache write-back', () => {
 
     const cacheFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
     expect(fs.existsSync(cacheFile)).toBe(true);
-    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, string>;
-    expect(data['dactyl:noun']).toBe('翼龍魔');
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, {zh: string; source: string}>;
+    expect(data['dactyl:noun'].zh).toBe('翼龍魔');
+    expect(data['dactyl:noun'].source).toBe('csv');
     expect(mockSetChinese).not.toHaveBeenCalled(); // UNKNOWN → no global write
   });
 
-  it('should write CEFR-known word to both domain cache and global cache', () => {
+  it('should write CEFR-known word to global only (NOT domain cache)', () => {
     const csvPath = writeCsv(tmpDir, 'test.csv', [
       makeRow({ lemma: 'sword', pos: 'Noun', cefrLevel: 'C1', defZh: '劍' }),
     ]);
     syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
 
-    const cacheFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
-    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, string>;
-    expect(data['sword:noun']).toBe('劍');
+    // CEFR-known → global only
     expect(mockSetChinese).toHaveBeenCalledWith('sword', 'Noun', '劍', 'csv');
+    // domain cache should NOT be created / written
+    const cacheFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
+    expect(fs.existsSync(cacheFile)).toBe(false);
   });
 
   it('should NOT overwrite existing domain cache entry (setIfEmpty)', () => {
@@ -318,23 +332,34 @@ describe('syncDefinitionCacheWithCsv — book cache write-back', () => {
 
     const cacheFile = path.join(tmpDir, 'book_the-demon-awakens_cache_zh.json');
     expect(fs.existsSync(cacheFile)).toBe(true);
-    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, string>;
-    expect(data['dactyl:noun']).toBe('翼龍魔');
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, {zh: string; source: string}>;
+    expect(data['dactyl:noun'].zh).toBe('翼龍魔');
   });
 
-  it('should write to both book and domain caches when both specified', () => {
+  it('should write UNKNOWN word to both book and domain caches when both specified', () => {
     const csvPath = writeCsv(tmpDir, 'test.csv', [
-      makeRow({ lemma: 'goblin', pos: 'Noun', cefrLevel: 'A2', defZh: '哥布林' }),
+      makeRow({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defZh: '翼龍魔' }),
     ]);
     syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy', book: 'the-demon-awakens' });
 
     const bookFile   = path.join(tmpDir, 'book_the-demon-awakens_cache_zh.json');
     const domainFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
-    const bookData   = JSON.parse(fs.readFileSync(bookFile, 'utf-8'))   as Record<string, string>;
-    const domainData = JSON.parse(fs.readFileSync(domainFile, 'utf-8')) as Record<string, string>;
-    expect(bookData['goblin:noun']).toBe('哥布林');
-    expect(domainData['goblin:noun']).toBe('哥布林');
-    expect(mockSetChinese).toHaveBeenCalledWith('goblin', 'Noun', '哥布林', 'csv'); // also global
+    const bookData   = JSON.parse(fs.readFileSync(bookFile, 'utf-8'))   as Record<string, {zh: string; source: string}>;
+    const domainData = JSON.parse(fs.readFileSync(domainFile, 'utf-8')) as Record<string, {zh: string; source: string}>;
+    expect(bookData['dactyl:noun'].zh).toBe('翼龍魔');
+    expect(domainData['dactyl:noun'].zh).toBe('翼龍魔');
+    expect(mockSetChinese).not.toHaveBeenCalled(); // UNKNOWN → no global write
+  });
+
+  it('should write CEFR-known word to global only (NOT book or domain)', () => {
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'sword', pos: 'Noun', cefrLevel: 'C1', defZh: '劍' }),
+    ]);
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy', book: 'the-demon-awakens' });
+
+    expect(mockSetChinese).toHaveBeenCalledWith('sword', 'Noun', '劍', 'csv');
+    expect(fs.existsSync(path.join(tmpDir, 'book_the-demon-awakens_cache_zh.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'domain_fantasy_cache_zh.json'))).toBe(false);
   });
 });
 
@@ -394,5 +419,92 @@ describe('syncDefinitionCacheWithCsv — layered cache read (cache → CSV)', ()
 
     expect(readDefZh(csvPath)[0]).toBe('奔跑');
     expect(mockGetChinese).toHaveBeenCalledWith('run', 'Verb');
+  });
+});
+
+// ── definition_en 雙向同步 ─────────────────────────────────────────────────────
+
+describe('syncDefinitionCacheWithCsv — en cache → CSV (fill definition_en from cache)', () => {
+  it('should fill definition_en from global word-cache when empty', () => {
+    // Given: wc.get returns an entry for 'run'
+    mockGet.mockImplementation((word: string) =>
+      word === 'run' ? { def: 'to move fast', tier: 'cache' } : null,
+    );
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'run', pos: 'Verb', cefrLevel: 'A2', defEn: '', defZh: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(readDefEn(csvPath)[0]).toBe('to move fast');
+    expect(result.filledFromCache).toBe(1);
+  });
+
+  it('should fill definition_en from domain en cache (priority over global)', () => {
+    // Given: domain en cache has an entry; global also has one
+    const enCacheFile = path.join(tmpDir, 'domain_fantasy_cache.json');
+    fs.writeFileSync(enCacheFile, JSON.stringify({ 'powrie:noun': { def: 'a foul dwarf', source: 'manual' } }), 'utf-8');
+    mockGet.mockReturnValue({ def: 'generic def', tier: 'cache' });
+
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'powrie', pos: 'Noun', cefrLevel: 'UNKNOWN', defEn: '', defZh: '' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+    // Then: domain en cache takes priority
+    expect(readDefEn(csvPath)[0]).toBe('a foul dwarf');
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('should NOT overwrite existing definition_en in CSV', () => {
+    mockGet.mockReturnValue({ def: 'from cache', tier: 'cache' });
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'run', pos: 'Verb', cefrLevel: 'A2', defEn: 'existing def', defZh: '' }),
+    ]);
+    const mtimeBefore = fs.statSync(csvPath).mtimeMs;
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    const mtimeAfter = fs.statSync(csvPath).mtimeMs;
+    // Then: definition_en not overwritten; file only rewritten if zh was filled
+    expect(readDefEn(csvPath)[0]).toBe('existing def');
+    expect(mtimeAfter).toBe(mtimeBefore); // no change (defZh also empty, no cache hit)
+  });
+});
+
+describe('syncDefinitionCacheWithCsv — CSV → en cache (write definition_en to cache)', () => {
+  it('should write UNKNOWN word definition_en to domain en cache', () => {
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defEn: 'a winged lizard', defZh: '' }),
+    ]);
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+
+    const enFile = path.join(tmpDir, 'domain_fantasy_cache.json');
+    expect(fs.existsSync(enFile)).toBe(true);
+    const data = JSON.parse(fs.readFileSync(enFile, 'utf-8')) as Record<string, {def: string; source: string}>;
+    expect(data['dactyl:noun'].def).toBe('a winged lizard');
+    expect(data['dactyl:noun'].source).toBe('mw');
+  });
+
+  it('should write CEFR-known word definition_en to global cache (setCache)', () => {
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'sword', pos: 'Noun', cefrLevel: 'C1', defEn: 'a weapon with a long blade', defZh: '' }),
+    ]);
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+
+    expect(mockSetCache).toHaveBeenCalledWith('sword', 'Noun', 'a weapon with a long blade', 'csv');
+    expect(fs.existsSync(path.join(tmpDir, 'domain_fantasy_cache.json'))).toBe(false);
+  });
+
+  it('should NOT overwrite existing domain en cache entry (setEnIfEmpty)', () => {
+    const enFile = path.join(tmpDir, 'domain_fantasy_cache.json');
+    fs.writeFileSync(enFile, JSON.stringify({ 'dactyl:noun': { def: 'old def', source: 'manual' } }), 'utf-8');
+
+    const csvPath = writeCsv(tmpDir, 'test.csv', [
+      makeRow({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defEn: 'new def', defZh: '' }),
+    ]);
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+
+    const data = JSON.parse(fs.readFileSync(enFile, 'utf-8')) as Record<string, {def: string; source: string}>;
+    expect(data['dactyl:noun'].def).toBe('old def');
   });
 });

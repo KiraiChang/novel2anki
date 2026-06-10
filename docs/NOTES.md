@@ -79,9 +79,13 @@
 
 - **CLI 一律在 header 顯示執行指令與快取路徑**（`src/index.ts`，2026-06-09）：從 `process.argv.slice(2)` 重建執行指令字串（含空白的參數加引號），搭配 `WORD_CACHE_PATH` env（或預設 `~/.novel2anki`）計算快取目錄，在所有指令的 header 統一輸出。方便使用者確認當下執行的是哪一個 CSV 路徑，以及資料寫入哪個目錄，避免因快取路徑設定不同而導致資料寫錯位置。
 
-- **`--fill-def-zh` 分層快取設計：global 限 CEFR 已知詞，domain / book 無限制**（`src/csv/beginnerTranslator.ts`、`src/nlp/wordCache.ts`，2026-06-10）：`word-cache-zh.json`（global）只收錄 CEFR level 已知的詞（非 UNKNOWN），防止奇幻自創詞（dactyl、powrie 等）或角色名汙染跨書共用的全局快取。domain / book 層（`domain_{name}_cache_zh.json` / `book_{name}_cache_zh.json`）不套用 CEFR 限制，允許書本 / 類型特有詞彙的翻譯存入並在同域內復用。CLI 語法：`--fill-def-zh=fantasy` 或 `--fill-def-zh=fantasy,the-demon-awakens`（以 `=` 帶值、`,` 分隔，避免 `|` 在 shell 被解讀為 pipe）。查詢優先順序固定為 book → domain → global，global 永遠作最後 fallback（即使指定了 domain/book）。
+- **`--fill-def-zh` 分層快取設計：global 與 domain/book 互補不重疊**（`src/csv/beginnerTranslator.ts`、`src/nlp/wordCache.ts`，2026-06-10）：兩層寫入條件互斥——global 只收 CEFR level 已知的詞（非 UNKNOWN）；domain / book 只收 CEFR UNKNOWN 的詞（不在 CEFR 字庫內）。這樣設計使兩層完全互補：全局快取處理通用詞彙（A1–C2），domain/book 快取處理領域/書本特有詞彙（奇幻自創詞、角色名等），不會重疊。CLI 語法：`--fill-def-zh=fantasy` 或 `--fill-def-zh=fantasy,the-demon-awakens`（以 `=` 帶值、`,` 分隔，避免 `|` 在 shell 被解讀為 pipe）。查詢優先順序固定為 book → domain → global，global 永遠作最後 fallback。
 
 - **`DefinitionLayerCache.setIfEmpty` 不覆寫現有條目**（`src/nlp/wordCache.ts`，2026-06-10）：domain / book 快取的寫回（CSV → cache）採 `setIfEmpty`——若 key 已有值則保留，僅在空白時寫入。這讓人工精修的 domain/book 翻譯不被後續自動翻譯覆蓋，且同時處理 domain + book 時不需考慮寫入順序。回傳 bool 表示是否實際寫入，搭配 `savedToCache` 計數器只在至少一層確實寫入時才加 1。
+
+- **`DefinitionLayerCache` zh 格式升級為 `CacheZhEntry`，新增英文 en 快取**（`src/nlp/wordCache.ts`，2026-06-10）：zh 快取原先採純字串 `Record<string, string>`，已升級為 `Record<string, CacheZhEntry>`（`{zh, source}`）——與全局 `word-cache-zh.json` 格式完全一致，方便手動查閱與工具整合。同時新增英文 en 快取（`{type}_{name}_cache.json`）儲存領域/書本的英文定義，結構同 `word-cache.json`（`{def, source}`）。`setEnIfEmpty(word, pos, def, source)` / `getEn(word, pos)` 供 `syncDefinitionCacheWithCsv` 呼叫。向下相容：讀取舊格式純字串值時自動升級為 `{zh, source: 'legacy'}`，現有快取檔案無需手動遷移。
+
+- **`syncDefinitionCacheWithCsv` 同時同步 `definition_en` 與 `definition_zh`**（`src/csv/beginnerTranslator.ts`，2026-06-10）：兩欄各自獨立雙向同步——`definition_en` 空白時從 book → domain en cache → `wc.get()` 補填（例如 `--prefetch-cefr` 建立的 `word-cache.json` 定義直接填回 CSV）；`definition_en` 非空時，UNKNOWN 詞寫入 domain/book en cache（`setEnIfEmpty`），CEFR 已知詞寫入全局 `word-cache.json`（`setCache`）。計數器邏輯：write 優先於 fill；同一列可以同時有 zh 寫入與 en 補填，以 `wroteAny` 優先計入 `savedToCache`。
 
 - **`translateBeginnerWordsCsv` Phase 3：`definition_zh` 由「每列覆寫」改為「空白才寫入」**（`src/csv/beginnerTranslator.ts`，2026-06-10）：原始設計對 `definition_zh` 無條件覆寫，但 `needTranslation` 現在也包含「definition_zh 已有但 context_sentence_zh 空白」的列，若仍無條件覆寫會將人工校正的定義抹掉。改為與 `context_sentence_zh` 相同的邏輯：已有值則跳過，force 模式才強制覆寫。
 
