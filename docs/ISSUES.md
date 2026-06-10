@@ -33,6 +33,8 @@
 - **字典 API 定義品質不足**（`src/csv/beginnerTranslator.ts`）：已改為 MW Learner's API 優先，但 Fantasy 自創詞（如 `powrie`、`powry`）兩個 API 皆無收錄，fallback 為詞本身，翻譯後端遇到無意義字串可能亂翻，需人工校正。
 - **翻譯批次上下文影響翻譯**（`src/csv/beginnerTranslator.ts`）：翻譯後端 array 模式會以同批次文字互為上下文，雖已改為交錯排列（`[def1, sent1, def2, sent2, …]`）降低跨詞污染，但同批次內 25 組詞對仍可能相互干擾，無法完全消除。
 - **MW API key 類型錯誤靜默 fallback**（`src/csv/beginnerTranslator.ts`，已修復）：dictionaryapi.com 不同字典各有獨立 key；填入 Collegiate key 但呼叫 Learner's 端點（或反之）會收到 403，原本靜默 fallback 到 Free Dictionary，使用者不知道 MW 未生效。已修正為：① 使用 Learner's 端點（`/learners/json`）；② `!res.ok` 時輸出 stderr 警告訊息。
+- **`needTranslation` 過濾只看 `definition_zh`，導致 `context_sentence_zh` 永遠空白**（`src/csv/beginnerTranslator.ts`，**已修復 2026-06-10**）：過濾條件改為 `definition_zh` OR `context_sentence_zh` 任一空白即納入翻譯；Phase 3 `definition_zh` 寫入改為空白才寫入（不覆蓋既有值）。
+- **舊 CSV 的 `context_sentence_zh` 為簡體中文**：各翻譯後端現已均設定繁體中文目標（DeepL=`zh-HANT`、Google=`zh-TW`、Azure=`zh-Hant`、Claude=繁體提示），但快取中的舊翻譯未自動更新。對已翻譯的 CSV 執行 `--translate-force` 可強制重翻為繁體中文。
 
 ## Mock 模式
 

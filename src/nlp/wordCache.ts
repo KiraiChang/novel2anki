@@ -229,6 +229,7 @@ export class WordCacheManager {
   get cacheZhFilePath():       string { return this.cacheZhPath;       }
   get sentenceCacheFilePath(): string { return this.sentenceCachePath; }
   get phraseCacheFilePath():   string { return this.phraseCachePath;   }
+  get cacheDir():              string { return path.dirname(this.cachePath); }
 
   private loadDict(): DictData {
     try {
@@ -287,4 +288,55 @@ let _instance: WordCacheManager | null = null;
 export function getWordCache(): WordCacheManager {
   if (!_instance) _instance = new WordCacheManager();
   return _instance;
+}
+
+// ── domain / book 定義翻譯分層快取 ───────────────────────────────────────────
+
+/** domain 或 book 專屬的中文定義快取，格式與 word-cache-zh.json 相同（key: word:pos 或 word）
+ *  - 檔案命名：`{type}_{name}_cache_zh.json`，存放於 global cache 同目錄
+ *  - setIfEmpty：已有值則不覆寫（由呼叫方負責冪等寫回）
+ */
+export class DefinitionLayerCache {
+  private readonly data: Record<string, string> = {};
+  private dirty = false;
+  readonly filePath: string;
+
+  constructor(cacheDir: string, type: 'domain' | 'book', name: string) {
+    this.filePath = path.join(cacheDir, `${type}_${name}_cache_zh.json`);
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as Record<string, unknown>;
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === 'string') this.data[k] = v;
+        }
+      }
+    } catch { /* 損壞時從空白開始 */ }
+  }
+
+  private key(word: string, pos?: string | null): string {
+    const w = word.toLowerCase().trim();
+    return pos ? `${w}:${pos.toLowerCase().trim()}` : w;
+  }
+
+  get(word: string, pos?: string | null): string | null {
+    return this.data[this.key(word, pos)] ?? this.data[this.key(word)] ?? null;
+  }
+
+  /** 若 key 尚無值則寫入，回傳是否實際寫入 */
+  setIfEmpty(word: string, pos: string | null | undefined, zh: string): boolean {
+    const k = this.key(word, pos);
+    if (this.data[k]) return false;
+    this.data[k] = zh;
+    this.dirty = true;
+    return true;
+  }
+
+  flush(): void {
+    if (!this.dirty) return;
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8');
+    this.dirty = false;
+  }
+
+  get size(): number { return Object.keys(this.data).length; }
 }

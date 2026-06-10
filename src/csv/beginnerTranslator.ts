@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { TranslatorConfig, batchTranslate } from '../cards/translator';
 import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
-import { getWordCache } from '../nlp/wordCache';
+import { getWordCache, DefinitionLayerCache } from '../nlp/wordCache';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -617,15 +617,29 @@ export interface SyncDefinitionResult {
   outputPath:      string;
 }
 
+/** 傳入 --fill-def-zh 的 domain / book 設定 */
+export interface FillDefZhConfig {
+  domain?: string;
+  book?: string;
+}
+
 /**
- * 雙向同步詞彙中文定義：
- * - definition_zh 不為空 → 快取尚無才寫入 word-cache-zh.json（key: lemma:pos）；已有則略過
- * - definition_zh 為空   → 從 word-cache-zh.json 補填（lemma:pos → lemma fallback）
+ * 雙向同步詞彙中文定義（支援 domain / book 分層快取）：
+ *
+ * CSV → cache（definition_zh 不為空）：
+ *   - book / domain cache：有指定時，key 尚無值才寫入（setIfEmpty）
+ *   - global cache：CEFR level 已知（非 UNKNOWN）且 key 尚無值才寫入
+ *
+ * cache → CSV（definition_zh 為空）：
+ *   - 查詢順序：book → domain → global
+ *   - 有指定 book/domain 時，仍以 global 作為最終 fallback
+ *
  * 若有任何 CSV 更新，自動寫回檔案。
  */
 export function syncDefinitionCacheWithCsv(
   csvPath: string,
   onProgress?: (current: number, total: number, action: 'saved' | 'filled' | 'skip') => void,
+  config?: FillDefZhConfig,
 ): SyncDefinitionResult {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -644,6 +658,9 @@ export function syncDefinitionCacheWithCsv(
   }
 
   const wc = getWordCache();
+  const domainCache = config?.domain ? new DefinitionLayerCache(wc.cacheDir, 'domain', config.domain) : null;
+  const bookCache   = config?.book   ? new DefinitionLayerCache(wc.cacheDir, 'book',   config.book)   : null;
+
   let savedToCache    = 0;
   let skippedCache    = 0;
   let filledFromCache = 0;
@@ -651,9 +668,10 @@ export function syncDefinitionCacheWithCsv(
   let csvDirty        = false;
 
   for (let i = 0; i < rows.length; i++) {
-    const lemma = get(rows[i], 'lemma').trim();
-    const pos   = get(rows[i], 'pos').trim() || null;
-    const defZh = get(rows[i], 'definition_zh').trim();
+    const lemma     = get(rows[i], 'lemma').trim();
+    const pos       = get(rows[i], 'pos').trim() || null;
+    const defZh     = get(rows[i], 'definition_zh').trim();
+    const cefrLevel = get(rows[i], 'cefr_level').trim();
 
     if (!lemma) {
       noMatch++;
@@ -662,9 +680,20 @@ export function syncDefinitionCacheWithCsv(
     }
 
     if (defZh) {
-      // CSV → cache：快取尚無才存入，已有則略過
-      if (!wc.getChinese(lemma, pos)) {
+      // CSV → cache
+      let wroteAny = false;
+
+      if (bookCache)   wroteAny = bookCache.setIfEmpty(lemma, pos, defZh)   || wroteAny;
+      if (domainCache) wroteAny = domainCache.setIfEmpty(lemma, pos, defZh) || wroteAny;
+
+      // global：只有 CEFR 有 level 的詞才寫入
+      const cefrKnown = cefrLevel && cefrLevel !== 'UNKNOWN';
+      if (cefrKnown && !wc.getChinese(lemma, pos)) {
         wc.setChinese(lemma, pos, defZh, 'csv');
+        wroteAny = true;
+      }
+
+      if (wroteAny) {
         savedToCache++;
         onProgress?.(i + 1, rows.length, 'saved');
       } else {
@@ -672,8 +701,12 @@ export function syncDefinitionCacheWithCsv(
         onProgress?.(i + 1, rows.length, 'skip');
       }
     } else {
-      // cache → CSV：嘗試從快取補填
-      const cached = wc.getChinese(lemma, pos);
+      // cache → CSV：book → domain → global
+      let cached: string | null = null;
+      if (bookCache)   cached ??= bookCache.get(lemma, pos);
+      if (domainCache) cached ??= domainCache.get(lemma, pos);
+      cached ??= wc.getChinese(lemma, pos);
+
       if (cached) {
         while (rows[i].length <= defZhColIdx) rows[i].push('');
         rows[i][defZhColIdx] = cached;
@@ -694,5 +727,7 @@ export function syncDefinitionCacheWithCsv(
   }
 
   wc.flush();
+  domainCache?.flush();
+  bookCache?.flush();
   return { savedToCache, skippedCache, filledFromCache, noMatch, outputPath: csvPath };
 }

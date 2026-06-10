@@ -25,7 +25,7 @@ import { formatCoverageReport } from './nlp/coverageReport';
 import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile } from './csv/beginnerExporter';
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
-import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv } from './csv/beginnerTranslator';
+import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, FillDefZhConfig } from './csv/beginnerTranslator';
 import { getWordCache } from './nlp/wordCache';
 import { fillVocabTranslationsFromCache } from './cards/translationFiller';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
@@ -37,6 +37,13 @@ import { EnrichedChunk, EMPTY_CHUNK_NLP } from './nlp/types';
 import { estimateDeepL, estimateClaude, formatCostReport } from './nlp/costEstimator';
 
 const VALID_TYPES: CardTypes[] = ['vocab', 'cloze', 'character', 'plot'];
+
+/** --fill-def-zh[=layers] を解析して FillDefZhConfig を返す */
+function parseFillDefZhLayers(value: boolean | string | undefined): FillDefZhConfig {
+  if (!value || value === true) return {};
+  const parts = String(value).split(',').map(s => s.trim()).filter(Boolean);
+  return { domain: parts[0] || undefined, book: parts[1] || undefined };
+}
 
 const program = new Command();
 
@@ -66,7 +73,7 @@ program
   .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
   .option('--fill-sent-zh', '雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填')
-  .option('--fill-def-zh', '雙向同步詞彙中文定義：已有 definition_zh 的寫入 word-cache-zh.json；空白的從快取補填')
+  .option('--fill-def-zh [layers]', '雙向同步詞彙中文定義。可加 =domain,book 指定分層快取（例：--fill-def-zh=fantasy,the-demon-awakens）。未指定時只同步全局快取（CEFR 已知詞才寫入 global）')
   .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
   .option('--prefetch-cefr-zh', '批次將 word-cache.json 的英文定義翻成中文並存入 word-cache-zh.json（需設定 DEEPL_API_KEY；已翻譯的詞自動跳過）')
   .option('--prefetch-phrases', '批次預查片語庫所有片語的 MW 英文定義並存入 phrase-cache.json（需設定 MW_API_KEY；已查過的片語自動跳過，可中斷重跑）')
@@ -94,7 +101,7 @@ program
     mw?: boolean;
     updateDict?: boolean;
     fillSentZh?: boolean;
-    fillDefZh?: boolean;
+    fillDefZh?: boolean | string;  // true = no layers; string = "domain" or "domain,book"
     prefetchCefr?: boolean;
     prefetchCefrZh?: boolean;
     prefetchPhrases?: boolean;
@@ -341,11 +348,14 @@ program
 
         // 定義翻譯雙向同步：CSV ↔ word-cache-zh.json
         if (options.fillDefZh) {
+          const fillConfig = parseFillDefZhLayers(options.fillDefZh);
           const wc = getWordCache();
           console.log('');
           console.log(chalk.cyan(`定義翻譯同步（word-cache-zh.json）`));
           console.log(chalk.gray(`  快取路徑：${wc.cacheZhFilePath}`));
           console.log(chalk.gray(`  快取現有：${wc.cacheZhSize} 筆`));
+          if (fillConfig.domain) console.log(chalk.gray(`  domain 快取：domain_${fillConfig.domain}_cache_zh.json`));
+          if (fillConfig.book)   console.log(chalk.gray(`  book 快取：book_${fillConfig.book}_cache_zh.json`));
           console.log('');
           let totalSaved = 0;
           let totalSkipped = 0;
@@ -359,7 +369,7 @@ program
                 action === 'filled' ? chalk.green('[補填]')      :
                                       chalk.gray('[略過]');
               process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})  ${tag}   `);
-            });
+            }, fillConfig);
             process.stdout.write(`\r${chalk.green(`  ✓ 存入快取 ${result.savedToCache} 筆 | 快取已有 ${result.skippedCache} 筆 | 補填 CSV ${result.filledFromCache} 筆 | 略過 ${result.noMatch} 筆`)}\n`);
             totalSaved    += result.savedToCache;
             totalSkipped  += result.skippedCache;

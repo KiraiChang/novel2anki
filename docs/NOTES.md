@@ -79,4 +79,12 @@
 
 - **CLI 一律在 header 顯示執行指令與快取路徑**（`src/index.ts`，2026-06-09）：從 `process.argv.slice(2)` 重建執行指令字串（含空白的參數加引號），搭配 `WORD_CACHE_PATH` env（或預設 `~/.novel2anki`）計算快取目錄，在所有指令的 header 統一輸出。方便使用者確認當下執行的是哪一個 CSV 路徑，以及資料寫入哪個目錄，避免因快取路徑設定不同而導致資料寫錯位置。
 
+- **`--fill-def-zh` 分層快取設計：global 限 CEFR 已知詞，domain / book 無限制**（`src/csv/beginnerTranslator.ts`、`src/nlp/wordCache.ts`，2026-06-10）：`word-cache-zh.json`（global）只收錄 CEFR level 已知的詞（非 UNKNOWN），防止奇幻自創詞（dactyl、powrie 等）或角色名汙染跨書共用的全局快取。domain / book 層（`domain_{name}_cache_zh.json` / `book_{name}_cache_zh.json`）不套用 CEFR 限制，允許書本 / 類型特有詞彙的翻譯存入並在同域內復用。CLI 語法：`--fill-def-zh=fantasy` 或 `--fill-def-zh=fantasy,the-demon-awakens`（以 `=` 帶值、`,` 分隔，避免 `|` 在 shell 被解讀為 pipe）。查詢優先順序固定為 book → domain → global，global 永遠作最後 fallback（即使指定了 domain/book）。
+
+- **`DefinitionLayerCache.setIfEmpty` 不覆寫現有條目**（`src/nlp/wordCache.ts`，2026-06-10）：domain / book 快取的寫回（CSV → cache）採 `setIfEmpty`——若 key 已有值則保留，僅在空白時寫入。這讓人工精修的 domain/book 翻譯不被後續自動翻譯覆蓋，且同時處理 domain + book 時不需考慮寫入順序。回傳 bool 表示是否實際寫入，搭配 `savedToCache` 計數器只在至少一層確實寫入時才加 1。
+
+- **`translateBeginnerWordsCsv` Phase 3：`definition_zh` 由「每列覆寫」改為「空白才寫入」**（`src/csv/beginnerTranslator.ts`，2026-06-10）：原始設計對 `definition_zh` 無條件覆寫，但 `needTranslation` 現在也包含「definition_zh 已有但 context_sentence_zh 空白」的列，若仍無條件覆寫會將人工校正的定義抹掉。改為與 `context_sentence_zh` 相同的邏輯：已有值則跳過，force 模式才強制覆寫。
+
+- **`needTranslation` 過濾條件擴充，修復 context_sentence_zh 永遠空白問題**（`src/csv/beginnerTranslator.ts`，2026-06-10）：原本過濾條件只看 `definition_zh` 是否空白，導致「definition_zh 已填、context_sentence_zh 空白」的列被跳過，例句翻譯永遠為空（除非 `--translate-force`）。改為 OR 條件：任一欄空白即納入翻譯。
+
 - **`SEMANTIC_PREPOSITIONS` 白名單允許有語意的介系詞進入初學者字卡**（`src/nlp/beginnerFilter.ts`，2026-06-10）：`CONTENT_POS` 原本排除所有 `Preposition`，導致 `against`（靠著）、`beneath`（在…下面）等帶有明確方位語意的介系詞一律被過濾。直接加入 `Preposition` 到 `CONTENT_POS` 過於粗糙（會放入 `per`、`via`（功能性）等不值得學習的介系詞）；stopWords 已涵蓋 `about`/`around`/`through`/`within`/`despite`/`upon` 等高頻虛詞，stopWords 裡的介系詞走 `not-stopword` 路徑，不受白名單影響。白名單僅需涵蓋「不在 stopWords 但有語意」的介系詞（目前 17 個：against、amid、amidst、beneath、beyond、beside、besides、except、unlike、via、across、along、among、amongst、opposite、underneath、versus）。POS 誤標（compromise 有時把 `against` 誤標為 `Adjective`）不影響白名單邏輯，誤標的詞走 `CONTENT_POS.has('Adjective')` 通過；只有正確標為 `Preposition` 時才走白名單例外。
