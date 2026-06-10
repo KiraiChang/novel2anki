@@ -394,4 +394,96 @@ describe('WordCacheManager', () => {
       expect(wc.sentenceCacheSize).toBe(2);
     });
   });
+
+  // ── phrase cache ──────────────────────────────────────────────────────────────
+
+  describe('getPhrase / setPhrase / hasPhrase', () => {
+    it('should return null and hasPhrase=false for unknown phrase', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      // When / Then
+      expect(wc.getPhrase('in terms of')).toBeNull();
+      expect(wc.hasPhrase('in terms of')).toBe(false);
+    });
+
+    it('should return definition and hasPhrase=true after MW hit', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setPhrase('in terms of', '(phrase) used to indicate a comparison', 'MW');
+      // When / Then
+      expect(wc.getPhrase('in terms of')).toBe('(phrase) used to indicate a comparison');
+      expect(wc.hasPhrase('in terms of')).toBe(true);
+    });
+
+    it('should return empty string and hasPhrase=true after no-def entry', () => {
+      // Given: phrase queried but not found in MW
+      const wc = new WordCacheManager(tmpDir);
+      wc.setPhrase('some rare phrase', '', 'no-def');
+      // When / Then
+      expect(wc.getPhrase('some rare phrase')).toBe('');
+      expect(wc.hasPhrase('some rare phrase')).toBe(true);
+    });
+
+    it('should normalize phrase to lowercase for both set and get', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setPhrase('In Terms Of', 'def', 'MW');
+      // When / Then
+      expect(wc.getPhrase('in terms of')).toBe('def');
+      expect(wc.hasPhrase('IN TERMS OF')).toBe(true);
+    });
+
+    it('should increment phraseCacheSize for each unique phrase set', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.phraseCacheSize).toBe(0);
+      wc.setPhrase('for example', 'def1', 'MW');
+      wc.setPhrase('in addition', '', 'no-def');
+      // When / Then
+      expect(wc.phraseCacheSize).toBe(2);
+    });
+  });
+
+  describe('flush (phrase cache)', () => {
+    it('should write phrase-cache.json after setPhrase', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setPhrase('for example', '(adverb) as one example', 'MW');
+      // When
+      wc.flush();
+      // Then
+      const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'phrase-cache.json'), 'utf-8'));
+      expect(data['for example']).toEqual({ def: '(adverb) as one example', source: 'MW' });
+    });
+
+    it('should write no-def entries to phrase-cache.json', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.setPhrase('obscure phrase', '', 'no-def');
+      wc.flush();
+      // Then
+      const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'phrase-cache.json'), 'utf-8'));
+      expect(data['obscure phrase']).toEqual({ def: '', source: 'no-def' });
+    });
+
+    it('should NOT create phrase-cache.json when no setPhrase was called (dirty flag)', () => {
+      // Given
+      const wc = new WordCacheManager(tmpDir);
+      wc.flush();
+      // Then
+      expect(fs.existsSync(path.join(tmpDir, 'phrase-cache.json'))).toBe(false);
+    });
+
+    it('should persist phrase cache across instances', () => {
+      // Given
+      const wc1 = new WordCacheManager(tmpDir);
+      wc1.setPhrase('in terms of', '(phrase) a comparison', 'MW');
+      wc1.flush();
+      // When
+      const wc2 = new WordCacheManager(tmpDir);
+      // Then
+      expect(wc2.getPhrase('in terms of')).toBe('(phrase) a comparison');
+      expect(wc2.hasPhrase('in terms of')).toBe(true);
+    });
+  });
 });

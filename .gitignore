@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 /book/
 .idea
 .DS_Store
+
+# Data files are stored externally via WORD_CACHE_PATH (.env)
+/src/data/

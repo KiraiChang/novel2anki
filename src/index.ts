@@ -28,7 +28,7 @@ import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginne
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv } from './csv/beginnerDeeplTranslator';
 import { getWordCache } from './nlp/wordCache';
 import { fillVocabTranslationsFromCache } from './cards/translationFiller';
-import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from './nlp/cefrPrefetcher';
+import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
 import * as os from 'os';
 import { GeneratedCards } from './cards/types';
@@ -69,6 +69,7 @@ program
   .option('--fill-def-zh', '雙向同步詞彙中文定義：已有 definition_zh 的寫入 word-cache-zh.json；空白的從快取補填')
   .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
   .option('--prefetch-cefr-zh', '批次將 word-cache.json 的英文定義翻成中文並存入 word-cache-zh.json（需設定 DEEPL_API_KEY；已翻譯的詞自動跳過）')
+  .option('--prefetch-phrases', '批次預查片語庫所有片語的 MW 英文定義並存入 phrase-cache.json（需設定 MW_API_KEY；已查過的片語自動跳過，可中斷重跑）')
   .option('--clean-pos-cache', '清除 word-cache.json 與 word-cache-zh.json 中所有 POS-specific 條目（word:pos），保留 base key。修復複合詞覆寫問題後重建用。')
   .option('--clean-zh-base', '清除 word-cache-zh.json 中所有 base 條目（word，無 POS），保留 POS key。重建中文翻譯前清除汙染 base key 用。')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
@@ -96,10 +97,11 @@ program
     fillDefZh?: boolean;
     prefetchCefr?: boolean;
     prefetchCefrZh?: boolean;
+    prefetchPhrases?: boolean;
     cleanPosCache?: boolean;
     cleanZhBase?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.cleanPosCache && !options.cleanZhBase;
+    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -128,6 +130,7 @@ program
     if (options.updateDict) console.log(chalk.magenta('   [個人單字庫升級模式]'));
     if (options.prefetchCefr)    console.log(chalk.green('   [CEFR 字庫 MW 預查模式]'));
     if (options.prefetchCefrZh)  console.log(chalk.blue(`   [CEFR 字庫中文翻譯模式：${providerLabel}]`));
+    if (options.prefetchPhrases) console.log(chalk.green('   [片語庫 MW 預查模式]'));
     if (options.cleanPosCache)   console.log(chalk.red('   [POS 快取清除模式]'));
     if (options.cleanZhBase)     console.log(chalk.red('   [ZH base key 清除模式]'));
     if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
@@ -237,6 +240,36 @@ program
       console.log(chalk.green(`✓ 完成：新翻 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 無英文定義 ${result.noEnCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
       console.log(chalk.gray(`中文快取總筆數：${getWordCache().cacheZhSize} 筆`));
       console.log(chalk.gray(`中文快取路徑：${getWordCache().cacheZhFilePath}`));
+      return;
+    }
+
+    // 片語庫 MW 預查：不需要輸入檔案，直接讀內建片語庫
+    if (options.prefetchPhrases) {
+      if (!process.env.MW_API_KEY) {
+        console.error(chalk.red('錯誤：--prefetch-phrases 需設定環境變數 MW_API_KEY'));
+        process.exit(1);
+      }
+      const wc = getWordCache();
+      console.log(chalk.cyan(`片語庫 MW 預查`));
+      console.log(chalk.gray(`快取路徑：${wc.phraseCacheFilePath}`));
+      console.log(chalk.gray(`目前快取：${wc.phraseCacheSize} 筆`));
+      console.log('');
+
+      const result = await prefetchPhrasesToCache((done, total, meta) => {
+        const pct = String(Math.round(done / total * 100)).padStart(3);
+        const sourceTag =
+          meta.source === 'MW'     ? chalk.green('[MW]')    :
+          meta.source === 'cached' ? chalk.blue('[快取]')   :
+          meta.source === 'no-def' ? chalk.gray('[--]')     :
+          meta.source === 'no-key' ? chalk.red('[無 key]')  :
+                                     chalk.red('[錯誤]');
+        process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.phrase.padEnd(30)}`);
+      });
+
+      process.stdout.write('\n\n');
+      console.log(chalk.green(`✓ 完成：MW 命中 ${result.fetchedCount} 筆 | 無定義 ${result.failedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 共 ${result.totalCount} 個片語`));
+      console.log(chalk.gray(`片語快取總筆數：${getWordCache().phraseCacheSize} 筆`));
+      console.log(chalk.gray(`片語快取路徑：${getWordCache().phraseCacheFilePath}`));
       return;
     }
 

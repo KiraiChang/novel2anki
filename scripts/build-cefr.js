@@ -28,8 +28,12 @@ const fs = require('fs');
 const path = require('path');
 
 // ── 現有詞表（保留） ──────────────────────────────────────────────────────────
+const DATA_DIR = process.env['WORD_CACHE_PATH']
+  ? path.resolve(process.env['WORD_CACHE_PATH'])
+  : path.join(__dirname, '../src/data');
+
 const existing = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../src/data/cefr-wordlist.json'), 'utf-8')
+  fs.readFileSync(path.join(DATA_DIR, 'cefr-wordlist.json'), 'utf-8')
 );
 
 // ── American Oxford 5000 B2/C1 補充詞（美式英語拼字）────────────────────────
@@ -608,6 +612,6 @@ console.log('Merged total:', Object.keys(merged).length);
 console.log('Level distribution:', levels);
 
 // 寫出
-const outputPath = path.join(__dirname, '../src/data/cefr-wordlist.json');
+const outputPath = path.join(DATA_DIR, 'cefr-wordlist.json');
 fs.writeFileSync(outputPath, JSON.stringify(merged, null, 2), 'utf-8');
 console.log('Written to', outputPath);

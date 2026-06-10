@@ -71,4 +71,10 @@
 
 - **`fillVocabTranslationsFromCache` 統一呼叫點，不分散在各生成器**（`src/cards/translationFiller.ts`，2026-06-09）：`index.ts` 有 4 個獨立的輸出路徑（beginner words CSV 匯入、beginner tokens CSV 匯入、general CSV 匯入、主 PDF/EPUB 流程），每條路徑在輸出前各自呼叫 `fillVocabTranslationsFromCache`。若改在各生成器內部補填，新增生成器時容易遺漏；集中在輸出前作為後處理步驟，職責單純且易驗證。`FillResult` 返回值讓呼叫端決定是否顯示補填摘要，函式本身不耦合 UI 輸出。
 
+- **`WORD_CACHE_PATH` 同時控制使用者資料與參考資料的存取路徑**（`src/nlp/dataPath.ts`，2026-06-10）：原本 `WORD_CACHE_PATH` 只控制使用者資料（word-dict / word-cache / word-cache-zh / sentence-cache），`cefrLookup.ts` 與 `cefrPrefetcher.ts` 則用硬編碼的 `path.join(__dirname, '../data/cefr-wordlist.json')`。擴充後統一透過 `resolveDataPath(name)` 查找：先檢查 `$WORD_CACHE_PATH/<name>`，找不到退回 `src/data/<name>`。好處：使用者只需設定一個環境變數就能把所有可變資料（含 CEFR 字庫、片語庫）移到外部目錄；`src/data/` 整個加入 `.gitignore`，避免資料被意外提交。未設定 `WORD_CACHE_PATH` 時仍可從 `src/data/` 讀到內建資料，向下相容。選擇複用 `WORD_CACHE_PATH` 而非另立 `DATA_PATH`，是因為不希望 `.env.example` 多一個變數讓使用者困惑。
+
+- **`phrase-cache.json` 同時快取 MW 命中與查無結果（no-def）**（`src/nlp/cefrPrefetcher.ts`，2026-06-10）：片語庫有 1,409 個片語，但 MW Learner's Dictionary 收錄多字片語的比例偏低（預估命中率 20–30%）。若只快取命中結果，每次重跑都會對剩餘 ~1,000 個未命中片語重打 MW API，浪費查詢配額。因此採「全快取」策略：命中存 `{ def, source: 'MW' }`，查無結果存 `{ def: '', source: 'no-def' }`，`hasPhrase()` 兩種情況均回傳 `true`。需重查時刪除 `phrase-cache.json` 即可，不影響其他快取檔案。
+
+- **片語庫從三份 PDF 以座標解析建立，不用現成 NLP 套件**（`scripts/extract-phrase-lists.py`，2026-06-10）：OPAL Spoken（~250 phrases）、OPAL Written（~370 phrases）、Oxford Phrase List（750 phrases，A1–C1）格式相似，均為四欄排版（欄邊界 x ≈ 173/303/434 pt）。使用 pdfplumber `extract_words()` 取得每個詞的座標，按 `row_y` + `col` 分組拼接成行，不走 PDF 的原始文字流（可能排版混亂）。OPL 另用字型名稱（`UtopiaStd-Bold`）識別 CEFR 等級標記（A1/A2/B1/B2/C1），因 y 座標偵測在第 2–4 頁的等級行（y ≈ 114 pt）會被誤判為頁首 → 等級標記從不按 y 門檻過濾，只有非等級的片語內容才套用 y 範圍限制。片語正規化分四步：① 循環剝除開頭括弧前綴（最多 4 輪）；② 展開尾部可選詞（`as a result (of)` → 兩條目）；③ 剝除尾部代詞佔位符（sb/sth/yourself/oneself）；④ 以 ` / ` 拆分備選形式。最終 `phrase-list.json` 含 1,409 個不重複片語鍵。
+
 - **CLI 一律在 header 顯示執行指令與快取路徑**（`src/index.ts`，2026-06-09）：從 `process.argv.slice(2)` 重建執行指令字串（含空白的參數加引號），搭配 `WORD_CACHE_PATH` env（或預設 `~/.novel2anki`）計算快取目錄，在所有指令的 header 統一輸出。方便使用者確認當下執行的是哪一個 CSV 路徑，以及資料寫入哪個目錄，避免因快取路徑設定不同而導致資料寫錯位置。

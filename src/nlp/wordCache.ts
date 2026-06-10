@@ -17,6 +17,10 @@ type CacheZhData = Record<string, CacheZhEntry>;
 export interface SentenceCacheEntry { en: string; zh: string; }
 type SentenceCacheData = Record<string, SentenceCacheEntry>;
 
+// phrase-cache.json：MW 片語定義快取（命中與 no-def 均存，避免重複查詢）
+interface PhraseCacheEntry { def: string; source: string; }
+type PhraseCacheData = Record<string, PhraseCacheEntry>;
+
 export type CacheTier = 'dict' | 'cache';
 
 /** FNV-1a 32-bit hash → 8-char hex（效能優先，不用於密碼學） */
@@ -34,14 +38,17 @@ export class WordCacheManager {
   private readonly cachePath: string;
   private readonly cacheZhPath: string;
   private readonly sentenceCachePath: string;
+  private readonly phraseCachePath: string;
   private dict: DictData = {};
   private cache: CacheData = {};
   private cacheZh: CacheZhData = {};
   private sentenceCache: SentenceCacheData = {};
+  private phraseCache: PhraseCacheData = {};
   private dictDirty = false;
   private cacheDirty = false;
   private cacheZhDirty = false;
   private sentenceCacheDirty = false;
+  private phraseCacheDirty = false;
 
   constructor(baseDir?: string) {
     const dir = baseDir
@@ -51,10 +58,12 @@ export class WordCacheManager {
     this.cachePath         = path.join(dir, 'word-cache.json');
     this.cacheZhPath       = path.join(dir, 'word-cache-zh.json');
     this.sentenceCachePath = path.join(dir, 'sentence-cache.json');
+    this.phraseCachePath   = path.join(dir, 'phrase-cache.json');
     this.dict          = this.loadDict();
     this.cache         = this.loadCache();
     this.cacheZh       = this.loadCacheZh();
     this.sentenceCache = this.loadSentenceCache();
+    this.phraseCache   = this.loadPhraseCache();
   }
 
   private key(word: string, pos?: string | null): string {
@@ -184,23 +193,42 @@ export class WordCacheManager {
     this.sentenceCacheDirty = true;
   }
 
+  /** 查詢片語 MW 定義；回傳 null 表示尚未查過，回傳空字串表示 MW 無此片語 */
+  getPhrase(phrase: string): string | null {
+    return this.phraseCache[phrase.toLowerCase().trim()]?.def ?? null;
+  }
+
+  /** 寫入片語快取（MW 命中填 def；no-def 填空字串）（in-memory，呼叫 flush() 才落盤） */
+  setPhrase(phrase: string, def: string, source: string): void {
+    this.phraseCache[phrase.toLowerCase().trim()] = { def, source };
+    this.phraseCacheDirty = true;
+  }
+
+  /** 是否已查過此片語（不論 MW 有無結果） */
+  hasPhrase(phrase: string): boolean {
+    return phrase.toLowerCase().trim() in this.phraseCache;
+  }
+
   /** 將 in-memory 的修改批次寫盤（dirty flag 保護，避免無謂 I/O） */
   flush(): void {
     if (this.cacheDirty)         { this.saveJson(this.cachePath,         this.cache);         this.cacheDirty         = false; }
     if (this.dictDirty)          { this.saveJson(this.dictPath,          this.dict);          this.dictDirty          = false; }
     if (this.cacheZhDirty)       { this.saveJson(this.cacheZhPath,       this.cacheZh);       this.cacheZhDirty       = false; }
     if (this.sentenceCacheDirty) { this.saveJson(this.sentenceCachePath, this.sentenceCache); this.sentenceCacheDirty = false; }
+    if (this.phraseCacheDirty)   { this.saveJson(this.phraseCachePath,   this.phraseCache);   this.phraseCacheDirty   = false; }
   }
 
   get dictSize():          number { return Object.keys(this.dict).length;          }
   get cacheSize():         number { return Object.keys(this.cache).length;         }
   get cacheZhSize():       number { return Object.keys(this.cacheZh).length;       }
   get sentenceCacheSize(): number { return Object.keys(this.sentenceCache).length; }
+  get phraseCacheSize():   number { return Object.keys(this.phraseCache).length;   }
 
   get dictFilePath():          string { return this.dictPath;          }
   get cacheFilePath():         string { return this.cachePath;         }
   get cacheZhFilePath():       string { return this.cacheZhPath;       }
   get sentenceCacheFilePath(): string { return this.sentenceCachePath; }
+  get phraseCacheFilePath():   string { return this.phraseCachePath;   }
 
   private loadDict(): DictData {
     try {
@@ -235,6 +263,14 @@ export class WordCacheManager {
     try {
       if (fs.existsSync(this.sentenceCachePath))
         return JSON.parse(fs.readFileSync(this.sentenceCachePath, 'utf-8')) as SentenceCacheData;
+    } catch {}
+    return {};
+  }
+
+  private loadPhraseCache(): PhraseCacheData {
+    try {
+      if (fs.existsSync(this.phraseCachePath))
+        return JSON.parse(fs.readFileSync(this.phraseCachePath, 'utf-8')) as PhraseCacheData;
     } catch {}
     return {};
   }

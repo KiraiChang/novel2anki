@@ -21,6 +21,8 @@
 - [x] **CLI 執行資訊顯示 + 補填進度**（`src/index.ts`、`src/cards/translationFiller.ts`，2026-06-09）：每次執行任何指令時 header 顯示完整執行指令與快取路徑（`WORD_CACHE_PATH` 或預設 `~/.novel2anki`）。`fillVocabTranslationsFromCache` 新增 `onProgress` 回呼與 `FillResult` 返回值，4 個呼叫點均顯示即時百分比進度，完成後報告補填筆數。beginner words 路徑的字彙統計改為在補填完成後才輸出。
 - [x] **`--fill-def-zh` 雙向同步定義翻譯 CLI**（`src/index.ts`、`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：新增 `--fill-def-zh` 旗標，對 beginner words CSV 執行 `syncDefinitionCacheWithCsv`：非空 `definition_zh` 存入 `word-cache-zh.json`（key: `lemma:pos`）；空白列從快取補填；僅有填入時才重寫 CSV。不需 API key。
 - [x] **快取覆寫保護 `skippedCache`**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-09）：`syncSentenceCacheWithCsv` 與 `syncDefinitionCacheWithCsv` 的 CSV→cache 方向加入先查快取邏輯：快取已有值時略過不覆寫，計入 `skippedCache` 回傳欄位。CLI 顯示格式新增「快取已有 N 筆」欄位。
+- [x] **離線片語庫 `phrase-list.json`**（`scripts/extract-phrase-lists.py`、`src/data/phrase-list.json`、`src/nlp/phraseLookup.ts`，2026-06-10）：解析 OPAL spoken（~250 phrases）、OPAL written（~370 phrases）、Oxford Phrase List（750 phrases，A1–C1）三份 PDF，合併為 `src/data/phrase-list.json`（1409 個唯一片語）。資料結構：`{ opal_spoken?, opal_written?, opl_level? }`。TypeScript 查詢模組提供 `lookupPhrase(phrase)`（精確 + 尾綴替代詞剝除）與 `findPhrasesInText(text)`（最長優先滑動視窗，回傳位移與元資料）。
+- [x] **片語 MW 預查 `--prefetch-phrases`**（`src/nlp/cefrPrefetcher.ts`、`src/nlp/wordCache.ts`、`src/index.ts`，2026-06-10）：對 `phrase-list.json` 1409 個片語批次查詢 MW Learner's API，結果存入 `phrase-cache.json`（同 `WORD_CACHE_PATH` 目錄）。命中（`source: 'MW'`）與查無結果（`source: 'no-def'`）均快取，重跑時自動跳過。`WordCacheManager` 新增 `getPhrase` / `setPhrase` / `hasPhrase` / `phraseCacheSize` / `phraseCacheFilePath`。
 
 ## 翻譯品質改善（待規劃）
 

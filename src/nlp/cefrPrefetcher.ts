@@ -1,9 +1,7 @@
 import * as fs from 'fs';
-import * as path from 'path';
+import { resolveDataPath } from './dataPath';
 import { getWordCache } from './wordCache';
 import { batchTranslate, DeepLConfig } from '../cards/deeplTranslator';
-
-const CEFR_PATH = path.join(__dirname, '../data/cefr-wordlist.json');
 const MW_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 
 interface MWEntry {
@@ -46,7 +44,7 @@ export async function prefetchCefrToWordCache(
   _words?: string[],
 ): Promise<PrefetchResult> {
   const cefrWords = _words ?? Object.keys(
-    JSON.parse(fs.readFileSync(CEFR_PATH, 'utf-8')) as Record<string, string>,
+    JSON.parse(fs.readFileSync(resolveDataPath('cefr-wordlist.json'), 'utf-8')) as Record<string, string>,
   );
 
   const wc      = getWordCache();
@@ -175,7 +173,7 @@ export async function prefetchCefrZhToWordCache(
   _words?: string[],
 ): Promise<PrefetchZhResult> {
   const cefrWords = _words ?? Object.keys(
-    JSON.parse(fs.readFileSync(CEFR_PATH, 'utf-8')) as Record<string, string>,
+    JSON.parse(fs.readFileSync(resolveDataPath('cefr-wordlist.json'), 'utf-8')) as Record<string, string>,
   );
 
   const wc       = getWordCache();
@@ -289,4 +287,107 @@ export async function prefetchCefrZhToWordCache(
 
   wc.flush();
   return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount };
+}
+
+// ── 片語庫 MW 預查 ─────────────────────────────────────────────────────────────
+
+export interface PrefetchPhrasesProgress {
+  phrase: string;
+  source: 'cached' | 'MW' | 'no-def' | 'error' | 'no-key';
+}
+
+export interface PrefetchPhrasesResult {
+  totalCount:   number;
+  fetchedCount: number;
+  skippedCount: number;
+  failedCount:  number;
+}
+
+/**
+ * 批次預查片語庫的 MW 英文定義，結果存入 phrase-cache.json。
+ * 命中（MW）與未命中（no-def）均寫入快取，避免重複查詢。
+ * 已有快取的片語自動跳過，可中斷後重跑。
+ * @param onProgress 進度回呼
+ * @param _phrases 覆寫片語列表（測試用，省略時從內建 phrase-list.json 讀取）
+ */
+export async function prefetchPhrasesToCache(
+  onProgress?: (done: number, total: number, meta: PrefetchPhrasesProgress) => void,
+  _phrases?: string[],
+): Promise<PrefetchPhrasesResult> {
+  const phrases = _phrases ?? Object.keys(
+    JSON.parse(fs.readFileSync(resolveDataPath('phrase-list.json'), 'utf-8')) as Record<string, unknown>,
+  );
+
+  const wc    = getWordCache();
+  const mwKey = process.env.MW_API_KEY;
+  let fetchedCount = 0;
+  let skippedCount = 0;
+  let failedCount  = 0;
+
+  for (let i = 0; i < phrases.length; i++) {
+    const phrase = phrases[i];
+
+    if (wc.hasPhrase(phrase)) {
+      skippedCount++;
+      onProgress?.(i + 1, phrases.length, { phrase, source: 'cached' });
+      continue;
+    }
+
+    if (!mwKey) {
+      failedCount++;
+      onProgress?.(i + 1, phrases.length, { phrase, source: 'no-key' });
+      continue;
+    }
+
+    try {
+      const res = await fetch(
+        `${MW_API}/${encodeURIComponent(phrase)}?key=${encodeURIComponent(mwKey)}`,
+        { signal: AbortSignal.timeout(6000) },
+      );
+      if (!res.ok) {
+        process.stderr.write(`\n[MW] HTTP ${res.status} "${phrase}"\n`);
+        failedCount++;
+        onProgress?.(i + 1, phrases.length, { phrase, source: 'error' });
+        continue;
+      }
+
+      const raw = await res.json() as (MWEntry | string)[];
+      const entries = raw.filter(
+        (e): e is MWEntry => typeof e === 'object' && Array.isArray(e.shortdef) && e.shortdef.length > 0,
+      );
+
+      if (entries.length === 0) {
+        wc.setPhrase(phrase, '', 'no-def');
+        failedCount++;
+        onProgress?.(i + 1, phrases.length, { phrase, source: 'no-def' });
+        continue;
+      }
+
+      let found = false;
+      for (const entry of entries) {
+        const def = entry.shortdef?.find(isUsable);
+        if (!def) continue;
+        const strippedDef = stripMwNotation(def);
+        const formatted = entry.fl ? `(${entry.fl}) ${strippedDef}` : strippedDef;
+        wc.setPhrase(phrase, formatted, 'MW');
+        fetchedCount++;
+        onProgress?.(i + 1, phrases.length, { phrase, source: 'MW' });
+        found = true;
+        break;
+      }
+
+      if (!found) {
+        wc.setPhrase(phrase, '', 'no-def');
+        failedCount++;
+        onProgress?.(i + 1, phrases.length, { phrase, source: 'no-def' });
+      }
+    } catch (e) {
+      process.stderr.write(`\n[prefetch-phrases] "${phrase}" 錯誤：${(e as Error).message}\n`);
+      failedCount++;
+      onProgress?.(i + 1, phrases.length, { phrase, source: 'error' });
+    }
+  }
+
+  wc.flush();
+  return { totalCount: phrases.length, fetchedCount, skippedCount, failedCount };
 }

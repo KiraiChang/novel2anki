@@ -183,7 +183,9 @@ beginnerExporter.ts
 | API 生成 | `src/cards/generator.ts` | Claude 工具呼叫、Prompt Caching |
 | NLP 管線 | `src/nlp/pipeline.ts` | compromise tokenize+POS → wink-lemmatizer lemma → 詞頻 → CEFR 分級 → EnrichedChunk[] |
 | NLP 型別 | `src/nlp/types.ts` | `EnrichedChunk`、`ChunkNLP`、`VocabSuggestion`、`CefrLevel`、`WordToken`、`GlobalFreqEntry` |
-| CEFR 查詢 | `src/nlp/cefrLookup.ts` | `lookupCefrLevel()`、`generateVocabSuggestions()` |
+| CEFR 查詢 | `src/nlp/cefrLookup.ts` | `lookupCefrLevel()`、`generateVocabSuggestions()`；惰性載入 `cefr-wordlist.json`（透過 `resolveDataPath`） |
+| 片語查詢 | `src/nlp/phraseLookup.ts` | `lookupPhrase()`（精確 + 尾綴代詞剝除）、`findPhrasesInText()`（最長優先滑動視窗，回傳 `PhraseMatch[]`）、`phraseCount()`；惰性載入 `phrase-list.json` |
+| 資料路徑 | `src/nlp/dataPath.ts` | `resolveDataPath(name)`：先查 `WORD_CACHE_PATH/<name>`，找不到退回 `src/data/<name>`；統一解析 `cefr-wordlist.json` 與 `phrase-list.json` 的外部/內建路徑 |
 | NLP 輔助 | `src/nlp/promptHelper.ts` | `buildNlpHint()` — 注入 LLM prompt 的建議詞彙區塊 |
 | 離線生成 | `src/cards/offlineGenerator.ts` | Ollama fetch（循序），零新套件 → 詳見 [offline/ARCHITECTURE.md](offline/ARCHITECTURE.md) |
 | Mock 生成 | `src/cards/mockGenerator.ts` | 規則式提取，不需 API → 詳見 [mock/ARCHITECTURE.md](mock/ARCHITECTURE.md) |
@@ -210,8 +212,8 @@ beginnerExporter.ts
 | 翻譯管線 | `src/csv/beginnerDeeplTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV，例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath)`：雙向同步 `definition_zh` ↔ `word-cache-zh.json`（key: `lemma:pos`），邏輯與前者相同 |
 | 翻譯補填 | `src/cards/translationFiller.ts` | `fillVocabTranslationsFromCache(cards, onProgress?)`：對所有 `VocabCard` 補填缺失欄位——`definition_zh` 空時查 `word-cache-zh.json`，`exampleZh` 空時查 `sentence-cache.json`；已有內容不覆寫。回傳 `FillResult { definitionFilled, exampleFilled }`。`onProgress(current, total)` 回呼供 CLI 即時進度顯示。beginner words / beginner tokens / CSV import / 主流程等 4 個輸出路徑均在輸出前呼叫 |
 | 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku）；`deeplTranslator.ts` 為薄包裝層，保持既有 import 路徑相容性 |
-| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理 word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）/ sentence-cache.json（例句翻譯）四個快取；`get(word, pos)` / `getChinese(word, pos)` 各自採 `word:pos` → `word` fallback；`getSentenceZh(en)` / `setSentenceZh(en, zh)` 以 FNV-1a 32-bit hash 為 key；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫）。`sentenceCacheSize` / `sentenceCacheFilePath` getter 供 CLI 顯示 |
-| CEFR 預查器 | `src/nlp/cefrPrefetcher.ts` | `prefetchCefrToWordCache()`：對 CEFR 字庫 5782 詞批次預查 MW，所有 POS 變體分別存入 `word-cache.json`，已快取詞自動跳過可重跑。`prefetchCefrZhToWordCache(config)`：讀取 `word-cache.json` 英文定義，批次翻譯後存入 `word-cache-zh.json`，同樣可中斷重跑 |
+| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理五個快取——word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）/ sentence-cache.json（例句翻譯）/ phrase-cache.json（片語 MW 定義）；`get(word, pos)` / `getChinese(word, pos)` 各自採 `word:pos` → `word` fallback；`getSentenceZh(en)` / `setSentenceZh(en, zh)` 以 FNV-1a 32-bit hash 為 key；`getPhrase(phrase)` / `setPhrase(phrase, def, source)` / `hasPhrase(phrase)` 管理片語快取（命中與 no-def 均存）；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫） |
+| CEFR 預查器 | `src/nlp/cefrPrefetcher.ts` | `prefetchCefrToWordCache()`：對 CEFR 字庫 5782 詞批次預查 MW，所有 POS 變體分別存入 `word-cache.json`，已快取詞自動跳過可重跑。`prefetchCefrZhToWordCache(config)`：讀取 `word-cache.json` 英文定義，批次翻譯後存入 `word-cache-zh.json`，同樣可中斷重跑。`prefetchPhrasesToCache()`：對 `phrase-list.json` 1409 個片語批次預查 MW，結果存入 `phrase-cache.json`；命中與 no-def 均快取，避免重複查詢 |
 
 ## 核心型別
 
@@ -257,6 +259,19 @@ type SentenceCacheData = Record<string, SentenceCacheEntry>;
 // 翻譯補填結果
 interface FillResult { definitionFilled: number; exampleFilled: number; }
 
+// 片語查詢（phraseLookup.ts）
+interface PhraseEntry {
+  opal_spoken?: true;   // 出現於 OPAL Spoken Phrases
+  opal_written?: true;  // 出現於 OPAL Written Phrases
+  opl_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1';  // Oxford Phrase List CEFR 等級
+}
+interface PhraseMatch {
+  phrase: string;   // 比對到的片語鍵（正規化後）
+  entry:  PhraseEntry;
+  start:  number;   // 在原文中的字元起始偏移
+  end:    number;   // 在原文中的字元結束偏移
+}
+
 // 字彙統計（beginnerImporter.ts，供 HTML 報告使用）
 interface WordStat {
   lemma: string; pos: string; cefr: string;
@@ -278,6 +293,16 @@ interface BeginnerWordStats {
 | `MODEL_BASIC_ID` | 1715000001 | 詞彙卡、人物卡（單向） |
 | `MODEL_BASIC_REVERSED_ID` | 1715000002 | 情節卡（正反雙向） |
 | `MODEL_CLOZE_ID` | 1715000003 | 克漏字卡 |
+
+## 資料檔案
+
+| 檔案 | 來源 | 說明 |
+|------|------|------|
+| `cefr-wordlist.json` | `scripts/build-cefr.js` 產生 | 5,732 個單字的 CEFR 等級對照（A1–C2），由 `resolveDataPath` 解析路徑 |
+| `phrase-list.json` | `scripts/extract-phrase-lists.py` 產生 | 1,409 個學術/常見片語，整合 OPAL Spoken（~250）、OPAL Written（~370）、Oxford Phrase List（750，A1–C1）三份 PDF；結構：`{ opal_spoken?, opal_written?, opl_level? }` |
+| `phrase-cache.json` | `--prefetch-phrases` 自動建立 | MW Learner's API 片語查詢快取；key = 正規化片語字串，value = `{ def, source }`；命中（`source: 'MW'`）與查無結果（`source: 'no-def'`，`def: ''`）均寫入，避免重複查詢。儲存於 `WORD_CACHE_PATH`（與 word-dict / word-cache 同目錄） |
+
+`cefr-wordlist.json` 和 `phrase-list.json` 的查找順序：先 `$WORD_CACHE_PATH/<name>`（環境變數指定的外部目錄），找不到再退回 `src/data/<name>`（專案內建）。`src/data/` 已加入 `.gitignore`，不隨 git 提交。`phrase-cache.json` 固定寫入 `WORD_CACHE_PATH`（無退回機制）。
 
 ## 相依套件
 

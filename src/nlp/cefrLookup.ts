@@ -1,11 +1,19 @@
-import cefrData from '../data/cefr-wordlist.json';
+import * as fs from 'fs';
+import { resolveDataPath } from './dataPath';
 import { CefrLevel, VocabSuggestion } from './types';
 import { FreqEntry } from './freqAnalyzer';
 
 // 模組載入時一次性建立查詢 Map（O(1) 查詢）
-const CEFR_MAP: Map<string, CefrLevel> = new Map(
-  Object.entries(cefrData as Record<string, string>) as [string, CefrLevel][]
-);
+let _cefrMap: Map<string, CefrLevel> | null = null;
+
+function getCefrMap(): Map<string, CefrLevel> {
+  if (!_cefrMap) {
+    const filePath = resolveDataPath('cefr-wordlist.json');
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, string>;
+    _cefrMap = new Map(Object.entries(raw) as [string, CefrLevel][]);
+  }
+  return _cefrMap;
+}
 
 // 衍生詞回退：若 lemma 本身查無結果，嘗試剝除常見後綴找基底詞
 // 例：tightly→tight, blackness→black, movement→move, awaken→wake
@@ -38,8 +46,9 @@ const SUFFIXES: Array<[RegExp, string]> = [
 ];
 
 export function lookupCefrLevel(lemma: string): CefrLevel | undefined {
+  const map = getCefrMap();
   const word = lemma.toLowerCase();
-  const direct = CEFR_MAP.get(word);
+  const direct = map.get(word);
   if (direct) return direct;
 
   // 衍生詞回退：剝除後綴後查詢
@@ -47,7 +56,7 @@ export function lookupCefrLevel(lemma: string): CefrLevel | undefined {
     if (!suffix.test(word)) continue;
     const base = word.replace(suffix, replacement);
     if (base.length < 3) continue;
-    const found = CEFR_MAP.get(base);
+    const found = map.get(base);
     if (found) return found;
   }
   return undefined;

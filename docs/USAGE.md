@@ -50,6 +50,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
   --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
+  --prefetch-phrases      批次預查片語庫（1409 個片語）MW 英文定義，存入 phrase-cache.json（需設定 MW_API_KEY；命中與查無結果均快取）
   --fill-sent-zh          雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填
   --fill-def-zh           雙向同步詞彙中文定義：已有 definition_zh 的寫入 word-cache-zh.json；空白的從快取補填
 ```
@@ -418,12 +419,18 @@ Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬�
 
 ### 快取檔位置
 
+所有檔案預設存放於 `~/.novel2anki/`（可用 `.env` 的 `WORD_CACHE_PATH` 指定其他目錄）。  
+`WORD_CACHE_PATH` 同時控制使用者資料與參考資料的查找路徑：設定後，程式優先從該目錄讀取 `cefr-wordlist.json` 和 `phrase-list.json`，找不到才退回 `src/data/` 內建版本。
+
 | 檔案 | 內容 | 建立方式 |
 |------|------|---------|
-| `~/.novel2anki/word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
-| `~/.novel2anki/word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
-| `~/.novel2anki/word-cache-zh.json` | 翻譯後的繁體中文定義 | `--prefetch-cefr-zh` |
-| `~/.novel2anki/sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--deepl` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
+| `word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
+| `word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
+| `word-cache-zh.json` | 翻譯後的繁體中文定義 | `--prefetch-cefr-zh` |
+| `sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--deepl` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
+| `cefr-wordlist.json` | CEFR 字庫（5,732 詞，A1–C2） | `scripts/build-cefr.js` 產生；若存在則優先讀此處 |
+| `phrase-list.json` | 學術／常見片語庫（1,409 條，含 OPAL / OPL 來源） | `scripts/extract-phrase-lists.py` 產生；若存在則優先讀此處 |
+| `phrase-cache.json` | MW 片語定義快取（命中與 no-def 均存） | `--prefetch-phrases` 建立；存在時自動跳過已查詢的片語 |
 
 ## 例句翻譯快取（`--fill-sent-zh`）
 

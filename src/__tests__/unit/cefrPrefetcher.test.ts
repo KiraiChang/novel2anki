@@ -3,7 +3,7 @@ jest.mock('../../cards/deeplTranslator');
 
 import { getWordCache } from '../../nlp/wordCache';
 import { batchTranslate } from '../../cards/deeplTranslator';
-import { prefetchCefrToWordCache, prefetchCefrZhToWordCache } from '../../nlp/cefrPrefetcher';
+import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from '../../nlp/cefrPrefetcher';
 
 // ── 共用 mock ─────────────────────────────────────────────────────────────────
 
@@ -17,6 +17,9 @@ const mockCache = {
   hasChinese:               jest.fn(),
   hasPosCache:              jest.fn(),
   getAllCacheEntriesForWord: jest.fn(),
+  getPhrase:                jest.fn(),
+  setPhrase:                jest.fn(),
+  hasPhrase:                jest.fn(),
   cacheSize:                0,
 };
 
@@ -36,6 +39,7 @@ beforeEach(() => {
   mockCache.hasChinese.mockReturnValue(false);             // 預設：無任何 zh 快取
   mockCache.hasPosCache.mockReturnValue(false);            // 預設：無 POS-specific cache 條目
   mockCache.getAllCacheEntriesForWord.mockReturnValue([]);  // 預設：無英文條目
+  mockCache.hasPhrase.mockReturnValue(false);              // 預設：片語尚未查過
   delete process.env.MW_API_KEY;
   global.fetch = jest.fn();
 });
@@ -596,6 +600,206 @@ describe('prefetchCefrZhToWordCache — legacy base zh copy', () => {
     expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'noun', '（名詞）十字形狀', 'legacy:copied');
     expect(mockCache.setChinese).toHaveBeenCalledWith('cross', 'verb', '（名詞）十字形狀', 'legacy:copied');
     expect(batchTranslate).not.toHaveBeenCalled();
+  });
+});
+
+// ── prefetchPhrasesToCache ────────────────────────────────────────────────────
+
+const TEST_PHRASES = ['in terms of', 'for example', 'on the other hand'];
+
+describe('prefetchPhrasesToCache — cache hit', () => {
+  it('should skip phrase and report source=cached when already queried', async () => {
+    // Given: phrase already in cache (either MW hit or no-def)
+    mockCache.hasPhrase.mockReturnValue(true);
+    const sources: string[] = [];
+    // When
+    await prefetchPhrasesToCache((_, __, meta) => sources.push(meta.source), TEST_PHRASES);
+    // Then
+    expect(sources).toEqual(['cached', 'cached', 'cached']);
+    expect(mockCache.setPhrase).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('should increment skippedCount for each already-cached phrase', async () => {
+    // Given
+    mockCache.hasPhrase.mockReturnValue(true);
+    // When
+    const result = await prefetchPhrasesToCache(undefined, TEST_PHRASES);
+    // Then
+    expect(result.skippedCount).toBe(3);
+    expect(result.fetchedCount).toBe(0);
+    expect(result.failedCount).toBe(0);
+  });
+});
+
+describe('prefetchPhrasesToCache — no MW key', () => {
+  it('should report source=no-key and increment failedCount when MW_API_KEY is absent', async () => {
+    // Given: no MW key set
+    const sources: string[] = [];
+    // When
+    await prefetchPhrasesToCache((_, __, meta) => sources.push(meta.source), ['in terms of']);
+    // Then
+    expect(sources).toEqual(['no-key']);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('prefetchPhrasesToCache — MW hit', () => {
+  it('should call setPhrase with formatted definition and source=MW on success', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ fl: 'phrase', shortdef: ['used to indicate a comparison or a relationship'] }],
+    });
+    // When
+    await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then
+    expect(mockCache.setPhrase).toHaveBeenCalledWith(
+      'in terms of',
+      '(phrase) used to indicate a comparison or a relationship',
+      'MW',
+    );
+  });
+
+  it('should report source=MW and increment fetchedCount on MW hit', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ fl: 'adverb', shortdef: ['as one example among many possibilities'] }],
+    });
+    const sources: string[] = [];
+    // When
+    const result = await prefetchPhrasesToCache(
+      (_, __, meta) => sources.push(meta.source),
+      ['for example'],
+    );
+    // Then
+    expect(sources).toEqual(['MW']);
+    expect(result.fetchedCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+  });
+
+  it('should strip MW em-dash notation from phrase definition', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ fl: 'phrase', shortdef: ['used to show contrast —often used in formal writing'] }],
+    });
+    // When
+    await prefetchPhrasesToCache(undefined, ['on the other hand']);
+    // Then
+    expect(mockCache.setPhrase).toHaveBeenCalledWith(
+      'on the other hand',
+      '(phrase) used to show contrast',
+      'MW',
+    );
+  });
+});
+
+describe('prefetchPhrasesToCache — MW no result', () => {
+  it('should call setPhrase with empty def and source=no-def when MW returns string array', async () => {
+    // Given: MW 回傳建議字串陣列表示查無此片語
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ['term', 'terms', 'terminology'],
+    });
+    // When
+    await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then: no-def 也寫入快取，避免重複查詢
+    expect(mockCache.setPhrase).toHaveBeenCalledWith('in terms of', '', 'no-def');
+  });
+
+  it('should increment failedCount for no-def result', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ['suggestion'],
+    });
+    // When
+    const result = await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then
+    expect(result.failedCount).toBe(1);
+    expect(result.fetchedCount).toBe(0);
+  });
+
+  it('should increment failedCount when all shortdef entries are unusable', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ fl: 'phrase', shortdef: ['see also'] }], // unusable
+    });
+    // When
+    const result = await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then
+    expect(result.failedCount).toBe(1);
+    expect(mockCache.setPhrase).toHaveBeenCalledWith('in terms of', '', 'no-def');
+  });
+});
+
+describe('prefetchPhrasesToCache — MW API failures', () => {
+  it('should increment failedCount and not call setPhrase when MW returns non-200', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 429 });
+    // When
+    const result = await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then
+    expect(result.failedCount).toBe(1);
+    expect(mockCache.setPhrase).not.toHaveBeenCalled();
+  });
+
+  it('should increment failedCount and not call setPhrase when fetch throws', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockRejectedValue(new Error('timeout'));
+    // When
+    const result = await prefetchPhrasesToCache(undefined, ['in terms of']);
+    // Then
+    expect(result.failedCount).toBe(1);
+    expect(mockCache.setPhrase).not.toHaveBeenCalled();
+  });
+});
+
+describe('prefetchPhrasesToCache — flush and counts', () => {
+  it('should call flush() exactly once after processing all phrases', async () => {
+    // Given
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ fl: 'phrase', shortdef: ['used to indicate a comparison'] }],
+    });
+    // When
+    await prefetchPhrasesToCache(undefined, TEST_PHRASES);
+    // Then
+    expect(mockCache.flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return correct totalCount matching input phrases length', async () => {
+    // Given: first cached, second MW hit, third no-def
+    mockCache.hasPhrase.mockReturnValueOnce(true).mockReturnValue(false);
+    process.env.MW_API_KEY = 'test-key';
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ fl: 'adverb', shortdef: ['as one example of many'] }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ['suggestion1', 'suggestion2'],
+      });
+    // When
+    const result = await prefetchPhrasesToCache(undefined, TEST_PHRASES);
+    // Then
+    expect(result.totalCount).toBe(3);
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(1);
+    expect(result.failedCount).toBe(1);
   });
 });
 
