@@ -369,7 +369,7 @@ export async function translateBeginnerWordsCsv(
     phase: 'dict' | 'translate' | 'write',
     meta?: { source?: DictSource; word?: string },
   ) => void,
-  options?: { force?: boolean; prebuiltNames?: Set<string> },
+  options?: { force?: boolean; prebuiltNames?: Map<string, string> },
 ): Promise<TranslateResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -420,7 +420,10 @@ export async function translateBeginnerWordsCsv(
   const sentences = needTranslation.map(({ cols }) => get(cols, 'context_sentence'));
 
   // NER 人名保護：優先使用預建人名表（--beginner 階段產生），否則從本批句子動態偵測
-  const properNouns = options?.prebuiltNames ?? buildProperNounSet(sentences);
+  const namesMap = options?.prebuiltNames;
+  const properNouns = namesMap
+    ? new Set(namesMap.keys())
+    : buildProperNounSet(sentences);
   const nameMaps = sentences.map(s => protectNames(s, properNouns));
   const protectedSentences = nameMaps.map(m => m.text);
 
@@ -440,7 +443,7 @@ export async function translateBeginnerWordsCsv(
   const defZh = allTranslated.filter((_, i) => i % 2 === 0);
   const sentZh = allTranslated
     .filter((_, i) => i % 2 === 1)
-    .map((t, i) => restoreNames(t, nameMaps[i].restoreMap));
+    .map((t, i) => restoreNames(t, nameMaps[i].restoreMap, namesMap));
 
   // Phase 3：填回資料列
   onProgress?.(0, 1, 'write');

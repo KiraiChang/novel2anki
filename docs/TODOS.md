@@ -26,6 +26,8 @@
 - [x] **語意介系詞白名單 `SEMANTIC_PREPOSITIONS`**（`src/nlp/beginnerFilter.ts`，2026-06-10）：新增 17 個介系詞白名單（against / amid / amidst / beneath / beyond / beside / besides / except / unlike / via / across / along / among / amongst / opposite / underneath / versus），允許有位置/關係語意的介系詞通過 `content-pos` 過濾規則。stopWords 已涵蓋的虛詞介系詞（about/around/through/within 等）不受影響。
 - [x] **CLI flag 更名 `--deepl` → `--translate`**（`src/index.ts`、`src/csv/beginnerTranslator.ts`（原 `beginnerDeeplTranslator.ts`）、`src/cards/translator.ts`，2026-06-10）：`--deepl` / `--deepl-force` 更名為 `--translate` / `--translate-force`，避免誤導使用者以為翻譯一定走 DeepL。`deeplTranslator.ts` 薄包裝層刪除，所有呼叫者直接引用 `translator.ts`；`DeepLConfig` / `loadDeepLConfig` 全面改用 `TranslatorConfig` / `loadTranslatorConfig`；`beginnerDeeplTranslator.ts` 更名為 `beginnerTranslator.ts`。
 
+- [ ] **初學者模式 Cloze 字卡生成**（`src/csv/beginnerImporter.ts`、`src/index.ts`）：`importBeginnerWords` 目前只產生 `VocabCard[]`，`csvCards.cloze` 永遠為空。實作方式：以正規表示式在 `context_sentence` 中找 lemma（含前綴匹配涵蓋變化形），替換為 `{{c1::原形::definition_zh}}`，同時產出對應 `ClozeCard`；找不到時 fallback 為句尾附加 `[{{c1::lemma}}]`。可加 `--beginner-cloze` 旗標控制是否產生。
+
 ## 翻譯品質改善（待規劃）
 
 - [ ] **多後端翻譯比對 `--compare-trans`**：同批詞彙透過兩個翻譯提供者（如 DeepL + Azure）各跑一次，輸出對照表供人工審核，找出翻譯差異較大的詞彙集中修正。

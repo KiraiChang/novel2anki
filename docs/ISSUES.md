@@ -28,7 +28,9 @@
 
 ## 初學者模式（`--beginner` + `--translate`）
 
-- **人名表假陽性（mid-sentence 大寫通稱）**（`src/nlp/nameProtector.ts`）：mid-sentence 大寫詞偵測無法區分「角色名（Pony）」與「文法大寫通稱（Brother、Captain、Church）」，兩者都會進入 `*-beginner-names.txt`。假陽性保留在人名表不影響翻譯正確性（翻譯後端不會把 "Brother" 翻成別的詞），使用者若在意可手動刪除。真正有問題的是假陰性（人名未被偵測），需手動在 names.txt 補充。
+- **人名表假陽性（mid-sentence 大寫通稱）**（`src/nlp/nameProtector.ts`）：mid-sentence 大寫詞偵測無法區分「角色名（Pony）」與「文法大寫通稱（Church）」，兩者都會進入 `*-beginner-names.txt`。**宗教／軍事頭銜（Father、Abbot、Brother、Captain 等）已於 2026-06-10 加入 NAME_SKIP**，不再誤入人名保護集，可被翻譯後端正確翻譯。剩餘假陽性（如特定通稱大寫）保留在人名表不影響翻譯正確性，使用者若在意可手動刪除。真正有問題的是假陰性（人名未被偵測），需手動在 names.txt 補充。
+- **角色名被翻譯後端音譯錯誤或意譯**（`src/nlp/nameProtector.ts`，2026-06-10 新增 mapping 機制）：部分角色名（如 Markwart、Elbryan）在翻譯後端語境下可能被音譯錯誤或翻成有語意的詞（"Pony" → "小馬"）。現已支援 `names.txt` 中的 `英文名: 中文音譯` 格式（如 `Markwart: 馬克瓦特`），`restoreNames` 優先以指定音譯替換佔位符；無 mapping 的名詞仍保留英文原名。使用者需手動在 names.txt 補充音譯。
+- **代名詞被誤加入人名保護集導致 `context_sentence_zh` 殘留英文**（`src/nlp/nameProtector.ts`，**已修復 2026-06-10**）：`NAME_SKIP` 原以首字大寫版本（`'His'`）儲存，compromise `#ProperNoun` 回傳小寫 `'his'` 時繞過檢查而被保護，翻譯後還原為英文原文。修復：NAME_SKIP 改為小寫儲存，比對統一 `toLowerCase()`，並補充完整代名詞清單。
 
 - **字典 API 定義品質不足**（`src/csv/beginnerTranslator.ts`）：已改為 MW Learner's API 優先，但 Fantasy 自創詞（如 `powrie`、`powry`）兩個 API 皆無收錄，fallback 為詞本身，翻譯後端遇到無意義字串可能亂翻，需人工校正。
 - **翻譯批次上下文影響翻譯**（`src/csv/beginnerTranslator.ts`）：翻譯後端 array 模式會以同批次文字互為上下文，雖已改為交錯排列（`[def1, sent1, def2, sent2, …]`）降低跨詞污染，但同批次內 25 組詞對仍可能相互干擾，無法完全消除。
