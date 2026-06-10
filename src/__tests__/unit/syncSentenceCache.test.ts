@@ -3,7 +3,7 @@ jest.mock('../../nlp/wordCache');
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { syncSentenceCacheWithCsv } from '../../csv/beginnerDeeplTranslator';
+import { syncSentenceCacheWithCsv } from '../../csv/beginnerTranslator';
 import { getWordCache } from '../../nlp/wordCache';
 
 // ── mock 設定 ─────────────────────────────────────────────────────────────────

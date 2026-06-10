@@ -5,7 +5,7 @@ import * as os from 'os';
 jest.mock('../../nlp/wordCache');
 
 import { getWordCache } from '../../nlp/wordCache';
-import { fetchBeginnerWordsMW, updateWordDictFromCsv } from '../../csv/beginnerDeeplTranslator';
+import { fetchBeginnerWordsMW, updateWordDictFromCsv } from '../../csv/beginnerTranslator';
 
 // ── 共用 mock 設定 ────────────────────────────────────────────────────────────
 

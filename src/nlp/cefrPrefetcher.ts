@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { resolveDataPath } from './dataPath';
 import { getWordCache } from './wordCache';
-import { batchTranslate, DeepLConfig } from '../cards/deeplTranslator';
+import { batchTranslate, TranslatorConfig } from '../cards/translator';
 const MW_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 
 interface MWEntry {
@@ -168,7 +168,7 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
  * @param _words 覆寫詞列表（測試用）
  */
 export async function prefetchCefrZhToWordCache(
-  deeplConfig: DeepLConfig,
+  deeplConfig: TranslatorConfig,
   onProgress?: (done: number, total: number, meta: PrefetchZhProgress) => void,
   _words?: string[],
 ): Promise<PrefetchZhResult> {

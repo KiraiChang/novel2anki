@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { DeepLConfig, batchTranslate } from '../cards/deeplTranslator';
+import { TranslatorConfig, batchTranslate } from '../cards/translator';
 import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
 import { getWordCache } from '../nlp/wordCache';
 
@@ -198,7 +198,7 @@ async function fetchEnglishDefinition(
 
 async function batchTranslateChunked(
   texts: string[],
-  config: DeepLConfig,
+  config: TranslatorConfig,
   onProgress?: (done: number, total: number) => void,
 ): Promise<string[]> {
   const results: string[] = [];
@@ -362,11 +362,11 @@ export interface TranslateResult {
 
 export async function translateBeginnerWordsCsv(
   csvPath: string,
-  config: DeepLConfig,
+  config: TranslatorConfig,
   onProgress?: (
     current: number,
     total: number,
-    phase: 'dict' | 'deepl' | 'write',
+    phase: 'dict' | 'translate' | 'write',
     meta?: { source?: DictSource; word?: string },
   ) => void,
   options?: { force?: boolean; prebuiltNames?: Set<string> },
@@ -420,9 +420,9 @@ export async function translateBeginnerWordsCsv(
   const protectedSentences = nameMaps.map(m => m.text);
 
   const allTexts = englishDefs.flatMap((def, i) => [def, protectedSentences[i]]);
-  onProgress?.(0, allTexts.length, 'deepl');
+  onProgress?.(0, allTexts.length, 'translate');
   const allTranslated = await batchTranslateChunked(allTexts, config, (done, total) => {
-    onProgress?.(done, total, 'deepl');
+    onProgress?.(done, total, 'translate');
   });
 
   if (allTranslated.length !== allTexts.length) {

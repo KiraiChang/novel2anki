@@ -1,7 +1,7 @@
 import { GeneratedCards, VocabCard, ClozeCard, CharacterCard, PlotCard } from './types';
 import { CardTypes } from './generator';
 import { EnrichedChunk } from '../nlp/types';
-import { DeepLConfig, batchTranslate } from './deeplTranslator';
+import { TranslatorConfig, batchTranslate } from './translator';
 import {
   extractSentences,
   findSentenceWith,
@@ -34,7 +34,7 @@ async function fetchEnglishDefinition(word: string): Promise<string | null> {
   }
 }
 
-async function generateVocab(chunk: EnrichedChunk, config: DeepLConfig): Promise<VocabCard[]> {
+async function generateVocab(chunk: EnrichedChunk, config: TranslatorConfig): Promise<VocabCard[]> {
   const sentences = extractSentences(chunk.text);
   const storyText = sentences.join(' ');
   const suggestions = chunk.nlp.vocabSuggestions;
@@ -58,7 +58,7 @@ async function generateVocab(chunk: EnrichedChunk, config: DeepLConfig): Promise
   }));
 }
 
-async function generateCloze(chunk: EnrichedChunk, config: DeepLConfig): Promise<ClozeCard[]> {
+async function generateCloze(chunk: EnrichedChunk, config: TranslatorConfig): Promise<ClozeCard[]> {
   const sentences = extractSentences(chunk.text).slice(0, 2);
   if (sentences.length === 0) return [];
 
@@ -82,7 +82,7 @@ async function generateCloze(chunk: EnrichedChunk, config: DeepLConfig): Promise
   });
 }
 
-async function generateCharacter(chunk: EnrichedChunk, config: DeepLConfig): Promise<CharacterCard[]> {
+async function generateCharacter(chunk: EnrichedChunk, config: TranslatorConfig): Promise<CharacterCard[]> {
   const names = extractCapitalizedNames(chunk.text).slice(0, 2);
   if (names.length === 0) return [];
 
@@ -102,7 +102,7 @@ async function generateCharacter(chunk: EnrichedChunk, config: DeepLConfig): Pro
   }));
 }
 
-async function generatePlot(chunk: EnrichedChunk, config: DeepLConfig): Promise<PlotCard[]> {
+async function generatePlot(chunk: EnrichedChunk, config: TranslatorConfig): Promise<PlotCard[]> {
   const sentences = extractSentences(chunk.text);
   const summary = sentences.slice(0, 3).join(' ');
   const chapterLabel = chunk.chapter ? ` (${chunk.chapter})` : '';
@@ -122,7 +122,7 @@ async function generatePlot(chunk: EnrichedChunk, config: DeepLConfig): Promise<
 export async function generateDeepLCards(
   chunk: EnrichedChunk,
   types: CardTypes[],
-  config: DeepLConfig,
+  config: TranslatorConfig,
 ): Promise<GeneratedCards> {
   const [vocab, cloze, character, plot] = await Promise.all([
     types.includes('vocab')     ? generateVocab(chunk, config)     : Promise.resolve([]),

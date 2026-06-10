@@ -14,7 +14,7 @@ import { exportReadingToCsv, exportReadingToCsvSplits } from './csv/readingExpor
 import { exportReadingToHtml } from './html/readingExporter';
 import { generateCards as generateOfflineCards, loadOllamaConfig } from './cards/offlineGenerator';
 import { generateDeepLCards } from './cards/deeplGenerator';
-import { loadDeepLConfig } from './cards/deeplTranslator';
+import { loadTranslatorConfig } from './cards/translator';
 import { exportToApkg } from './anki/exporter';
 import { exportToHtml, exportToFlashHtml, exportReadingToFlashHtml, exportToComparisonHtml } from './html/exporter';
 import { exportBeginnerStatsToHtml } from './html/beginnerStatsExporter';
@@ -25,7 +25,7 @@ import { formatCoverageReport } from './nlp/coverageReport';
 import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile } from './csv/beginnerExporter';
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
-import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv } from './csv/beginnerDeeplTranslator';
+import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv } from './csv/beginnerTranslator';
 import { getWordCache } from './nlp/wordCache';
 import { fillVocabTranslationsFromCache } from './cards/translationFiller';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
@@ -52,8 +52,8 @@ program
   .option('--mock', '模擬模式：不呼叫 API，用簡單文字分析產生測試字卡')
   .option('--offline', '離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）')
   .option('--model <模型名稱>', '指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL 環境變數）')
-  .option('--deepl', '使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）')
-  .option('--deepl-force', '強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）')
+  .option('--translate', '批次翻譯 CSV 定義（後端依 TRANSLATE_PROVIDER 決定，預設 deepl；需設定對應的 API key）')
+  .option('--translate-force', '強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）')
   .option('--split-chapters', '將 CSV 依章節分割輸出（mock 模式）')
   .option('--split-size <數量>', '將 CSV 依每 N 個 chunk 分割輸出（mock 模式）')
   .option('--reading', '讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡')
@@ -80,8 +80,8 @@ program
     mock?: boolean;
     offline?: boolean;
     model?: string;
-    deepl?: boolean;
-    deeplForce?: boolean;
+    translate?: boolean;
+    translateForce?: boolean;
     splitChapters?: boolean;
     splitSize?: string;
     reading?: boolean;
@@ -101,9 +101,9 @@ program
     cleanPosCache?: boolean;
     cleanZhBase?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.deepl && !options.deeplForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
+    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
-      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --deepl / --deepl-force 旗標以不使用 Claude API'));
+      console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --translate / --translate-force 旗標以不使用 Claude API'));
       process.exit(1);
     }
 
@@ -117,11 +117,11 @@ program
     const deckName = options.deck ?? path.basename(pdfFile, path.extname(pdfFile));
     const maxChunks = options.chunks ? parseInt(options.chunks, 10) : Infinity;
 
-    const ollamaConfig = options.offline ? loadOllamaConfig(options.model) : null;
-    const deeplConfig  = options.deepl   ? loadDeepLConfig()               : null;
+    const ollamaConfig    = options.offline   ? loadOllamaConfig(options.model) : null;
+    const translateConfig = options.translate ? loadTranslatorConfig()         : null;
 
-    // 比對模式：--deepl + Claude API 或 --deepl + --offline
-    const isCompare = options.deepl && (options.offline || (!options.mock && process.env.ANTHROPIC_API_KEY));
+    // 比對模式：--translate + Claude API 或 --translate + --offline
+    const isCompare = options.translate && (options.offline || (!options.mock && process.env.ANTHROPIC_API_KEY));
 
     const providerLabel = (process.env['TRANSLATE_PROVIDER'] ?? 'DeepL').toUpperCase();
     console.log(chalk.cyan(`\n📖 小說 → Anki 字卡產生器`));
@@ -133,9 +133,9 @@ program
     if (options.prefetchPhrases) console.log(chalk.green('   [片語庫 MW 預查模式]'));
     if (options.cleanPosCache)   console.log(chalk.red('   [POS 快取清除模式]'));
     if (options.cleanZhBase)     console.log(chalk.red('   [ZH base key 清除模式]'));
-    if (options.mw && !options.deepl && !options.deeplForce) console.log(chalk.green('   [MW 預查模式]'));
-    if (options.mw && (options.deepl || options.deeplForce)) console.log(chalk.green(`   [MW 預查 + ${providerLabel} 翻譯模式]`));
-    if (options.deepl && !isCompare) console.log(chalk.blue(`   [${providerLabel} 翻譯模式]`));
+    if (options.mw && !options.translate && !options.translateForce) console.log(chalk.green('   [MW 預查模式]'));
+    if (options.mw && (options.translate || options.translateForce)) console.log(chalk.green(`   [MW 預查 + ${providerLabel} 翻譯模式]`));
+    if (options.translate && !isCompare) console.log(chalk.blue(`   [${providerLabel} 翻譯模式]`));
     if (isCompare) console.log(chalk.blue(`   [${providerLabel} 比對模式：${providerLabel} vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
     console.log(chalk.gray(`   字卡類型：${requestedTypes.join(', ')}`));
@@ -212,7 +212,7 @@ program
     // CEFR 字庫中文批次翻譯
     if (options.prefetchCefrZh) {
       let deeplCfg;
-      try { deeplCfg = loadDeepLConfig(); } catch (e) {
+      try { deeplCfg = loadTranslatorConfig(); } catch (e) {
         console.error(chalk.red(`錯誤：--prefetch-cefr-zh 無法載入翻譯設定：${(e as Error).message}`));
         process.exit(1);
       }
@@ -390,24 +390,24 @@ program
             }
           }
           console.log('');
-          if (!options.deepl && !options.deeplForce) {
+          if (!options.translate && !options.translateForce) {
             console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
-            console.log(chalk.cyan('下一步：執行以下指令進行 DeepL 翻譯：'));
+            console.log(chalk.cyan(`下一步：執行以下指令進行 ${providerLabel} 翻譯：`));
             const outputDir = isDirectory ? pdfFile : path.dirname(beginnerWordsCsvs[0]);
-            console.log(chalk.white(`  npx ts-node src/index.ts ${outputDir} -d "${deckName}" --deepl`));
+            console.log(chalk.white(`  npx ts-node src/index.ts ${outputDir} -d "${deckName}" --translate`));
             return;
           }
-          // --mw --deepl：繼續執行下方 DeepL 流程
+          // --mw --translate：繼續執行下方翻譯流程
         }
 
-        // DeepL 自動翻譯：翻譯後覆寫 CSV 並退出，不產生 APKG/HTML
+        // 批次翻譯：翻譯後覆寫 CSV 並退出，不產生 APKG/HTML
         // 使用者等所有分割檔翻譯完畢後再整目錄合併產出字卡
-        if (options.deepl || options.deeplForce) {
-          const deeplCfg = loadDeepLConfig();
-          const force = !!options.deeplForce;
+        if (options.translate || options.translateForce) {
+          const translateCfg = loadTranslatorConfig();
+          const force = !!options.translateForce;
           const est = estimateBeginnerTranslate(beginnerWordsCsvs, { force });
           console.log('');
-          if (force) console.log(chalk.magenta('⚡ 強制重新翻譯模式（--deepl-force）'));
+          if (force) console.log(chalk.magenta(`⚡ 強制重新翻譯模式（--translate-force）`));
           console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
 
           // 已全部翻譯且非強制模式：阻斷並提示清除方式
@@ -420,7 +420,7 @@ program
 
           const confirmed = await new Promise<boolean>(resolve => {
             const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-            rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
+            rl.question(chalk.bold(`是否繼續 ${providerLabel} 翻譯？[Y/n] `), ans => {
               rl.close();
               resolve(ans.trim().toLowerCase() !== 'n');
             });
@@ -440,12 +440,12 @@ program
 
           for (const csvPath of beginnerWordsCsvs) {
             process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
-            const result = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
+            const result = await translateBeginnerWordsCsv(csvPath, translateCfg, (cur, total, phase, meta) => {
               if (phase === 'dict') {
                 const sourceTag = meta?.source === 'dict' ? chalk.magenta('[字典]') : meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
                 process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
               } else {
-                const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+                const label = phase === 'translate' ? `${providerLabel} 翻譯` : '寫入';
                 process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
               }
             }, { force, prebuiltNames: prebuiltNamesForBatch });
@@ -672,31 +672,31 @@ program
           process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個`)}\n`);
         }
         console.log('');
-        if (!options.deepl && !options.deeplForce) {
+        if (!options.translate && !options.translateForce) {
           console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
-          console.log(chalk.cyan('下一步：執行以下指令進行 DeepL 翻譯：'));
+          console.log(chalk.cyan(`下一步：執行以下指令進行 ${providerLabel} 翻譯：`));
           if (wordsCsvPaths.length > 1) {
-            console.log(chalk.white(`  npx ts-node src/index.ts ${options.output} -d "${deckName}" --deepl`));
+            console.log(chalk.white(`  npx ts-node src/index.ts ${options.output} -d "${deckName}" --translate`));
           } else {
-            console.log(chalk.white(`  npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}" --deepl`));
+            console.log(chalk.white(`  npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}" --translate`));
           }
           return;
         }
-        // --mw --deepl：繼續執行下方 DeepL 流程
+        // --mw --translate：繼續執行下方翻譯流程
       }
 
-      // DeepL 自動翻譯
-      if (options.deepl || options.deeplForce) {
-        const deeplCfg = loadDeepLConfig();
-        const force = !!options.deeplForce;
+      // 批次翻譯
+      if (options.translate || options.translateForce) {
+        const translateCfg = loadTranslatorConfig();
+        const force = !!options.translateForce;
         const est = estimateBeginnerTranslate(wordsCsvPaths, { force });
         console.log('');
-        if (force) console.log(chalk.magenta('⚡ 強制重新翻譯模式（--deepl-force）'));
+        if (force) console.log(chalk.magenta(`⚡ 強制重新翻譯模式（--translate-force）`));
         console.log(chalk.cyan(formatBeginnerTranslateEstimate(est)));
 
         const confirmed = await new Promise<boolean>(resolve => {
           const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          rl.question(chalk.bold('是否繼續 DeepL 翻譯？[Y/n] '), ans => {
+          rl.question(chalk.bold(`是否繼續 ${providerLabel} 翻譯？[Y/n] `), ans => {
             rl.close();
             resolve(ans.trim().toLowerCase() !== 'n');
           });
@@ -719,12 +719,12 @@ program
 
         for (const csvPath of wordsCsvPaths) {
           process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
-          const res = await translateBeginnerWordsCsv(csvPath, deeplCfg, (cur, total, phase, meta) => {
+          const res = await translateBeginnerWordsCsv(csvPath, translateCfg, (cur, total, phase, meta) => {
             if (phase === 'dict') {
               const sourceTag = meta?.source === 'dict' ? chalk.magenta('[字典]') : meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
               process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
             } else {
-              const label = phase === 'deepl' ? 'DeepL 翻譯' : '寫入';
+              const label = phase === 'translate' ? `${providerLabel} 翻譯` : '寫入';
               process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
             }
           }, { force, prebuiltNames });
@@ -742,12 +742,12 @@ program
         console.log('');
         console.log(chalk.cyan('下一步：'));
         if (wordsCsvPaths.length > 1) {
-          console.log(chalk.cyan(`  1. 填入各分割 CSV 的 definition_zh（或加上 --deepl 自動翻譯）`));
+          console.log(chalk.cyan(`  1. 填入各分割 CSV 的 definition_zh（或加上 --translate 自動翻譯）`));
           console.log(chalk.cyan(`  2. 翻譯完成後，執行：`));
           console.log(chalk.white(`     npx ts-node src/index.ts ${options.output} -d "${deckName}"`));
           console.log(chalk.gray(`     （指定含所有分割 CSV 的目錄，系統會自動偵測並合併）`));
         } else {
-          console.log(chalk.cyan(`  1. 填入 ${path.basename(wordsCsvPaths[0])} 的 definition_zh（或加上 --deepl 自動翻譯）`));
+          console.log(chalk.cyan(`  1. 填入 ${path.basename(wordsCsvPaths[0])} 的 definition_zh（或加上 --translate 自動翻譯）`));
           console.log(chalk.cyan(`  2. 執行：`));
           console.log(chalk.white(`     npx ts-node src/index.ts ${wordsCsvPaths[0]} -d "${deckName}"`));
         }
@@ -775,8 +775,8 @@ program
     }
     console.log('');
 
-    // ── 成本預估（DeepL 才需要確認）────────────────────────────────
-    if (options.deepl) {
+    // ── 成本預估（translate 才需要確認）────────────────────────────────
+    if (options.translate) {
       const deepEst  = estimateDeepL(enrichedChunks, requestedTypes);
       const claudeEst = isCompare && !options.offline
         ? estimateClaude(enrichedChunks, requestedTypes)
@@ -857,8 +857,8 @@ program
 
       try {
         // 主要生成路由
-        const cards = options.deepl
-          ? await generateDeepLCards(chunk, requestedTypes, deeplConfig!)
+        const cards = options.translate
+          ? await generateDeepLCards(chunk, requestedTypes, translateConfig!)
           : options.mock
             ? generateMockCards(chunk, requestedTypes)
             : options.offline

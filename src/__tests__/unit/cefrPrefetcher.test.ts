@@ -1,8 +1,8 @@
 jest.mock('../../nlp/wordCache');
-jest.mock('../../cards/deeplTranslator');
+jest.mock('../../cards/translator');
 
 import { getWordCache } from '../../nlp/wordCache';
-import { batchTranslate } from '../../cards/deeplTranslator';
+import { batchTranslate } from '../../cards/translator';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from '../../nlp/cefrPrefetcher';
 
 // ── 共用 mock ─────────────────────────────────────────────────────────────────

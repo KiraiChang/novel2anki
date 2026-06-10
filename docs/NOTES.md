@@ -59,11 +59,11 @@
 
 - **三層快取設計的邊界清晰度**（`src/nlp/wordCache.ts`）：`word-dict.json`（精選）永遠不被程式自動覆寫，只有 `--update-dict` 時由使用者明確升級；`word-cache.json`（自動）可隨時整個刪除重建，不影響精選庫。兩個檔案各自獨立的 dirty flag 確保未修改的檔案不被重複寫入。這個設計讓不同書的書級定義（CSV 的 `definition_en`）與全局精選定義（word-dict）之間有明確的層次，不相互污染。
 
-- **MW 預查 `definition_en` 欄位作為查找鏈的快取橋樑**（`src/csv/beginnerDeeplTranslator.ts`，2026-06-08）：`definition_en` 是 CSV 層的 book-scope 覆寫機制。`--mw` 從三層快取填入此欄；使用者手動修改此欄是書級客製化（不影響全局快取）；`--update-dict` 是使用者主動將書級編輯升級為全局精選。`--deepl` 看到 `definition_en` 有值就直接使用，不再查 API，這也使 DeepL 重跑時無需重複 MW 查詢。
+- **MW 預查 `definition_en` 欄位作為查找鏈的快取橋樑**（`src/csv/beginnerTranslator.ts`，2026-06-08）：`definition_en` 是 CSV 層的 book-scope 覆寫機制。`--mw` 從三層快取填入此欄；使用者手動修改此欄是書級客製化（不影響全局快取）；`--update-dict` 是使用者主動將書級編輯升級為全局精選。`--translate` 看到 `definition_en` 有值就直接使用，不再查 API，這也使重跑時無需重複 MW 查詢。
 
 - **中文快取 `word-cache-zh.json` 獨立分離，不與英文快取混用**（`src/nlp/wordCache.ts`，2026-06-08）：中文快取採純字串 `Record<string, string>`，key 格式同英文（`word:pos` / `word`），查找 fallback 邏輯相同。分離的原因：英文定義快取（`word-cache.json`）記錄來源（`source: 'MW' | 'free'`），中文翻譯不需要此元資料，分離可保持各自檔案易讀、易手動編輯，也允許獨立清空重建某一語言的快取而不影響另一個。
 
-- **翻譯後端切換透過薄包裝層實現，既有呼叫者零修改**（`src/cards/translator.ts`，2026-06-08）：多後端邏輯集中於 `translator.ts`；`deeplTranslator.ts` 改為 re-export 包裝，`loadDeepLConfig()` 委派給 `loadTranslatorConfig()`，`batchTranslate()` 委派給 `translator.batchTranslate()`。這樣 `beginnerDeeplTranslator.ts`、`cefrPrefetcher.ts`、所有現有測試一行不動，新後端只需在 `.env` 設定 `TRANSLATE_PROVIDER` 即可生效。Google 和 Azure 後端使用 Node 18+ 內建 `fetch()`（不引入新 npm 套件），Claude 後端複用已有的 `@anthropic-ai/sdk`。
+- **翻譯後端切換：多後端邏輯集中於 `translator.ts`，CLI 改用語意中性的 `--translate`**（`src/cards/translator.ts`、`src/index.ts`，2026-06-08 / 2026-06-10）：`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端。CLI flag 原為 `--deepl` / `--deepl-force`，已更名為 `--translate` / `--translate-force`，避免誤導使用者以為一定走 DeepL。翻譯模組同步更名：`beginnerDeeplTranslator.ts` → `beginnerTranslator.ts`，`deeplTranslator.ts`（薄包裝層）已刪除，所有呼叫者直接引用 `translator.ts`。Google 和 Azure 後端使用 Node 18+ 內建 `fetch()`（不引入新 npm 套件），Claude 後端複用已有的 `@anthropic-ai/sdk`。
 
 - **例句快取採 FNV-1a 32-bit hash 為 key，不用原文字串**（`src/nlp/wordCache.ts`，2026-06-09）：key 若使用例句原文，JSON 中每筆 key 可達 80–150 字元，大量記錄時快取檔可觀。改用 FNV-1a 32-bit（`h ^= charCode; h = Math.imul(h, 0x01000193) >>> 0`）得到 8 字元 hex，快取檔可讀、效能最佳。32-bit 的碰撞空間為 2³² ≈ 43 億，對於數萬筆例句碰撞機率可忽略（生日攻擊門檻 ≈ 65,536 筆才達 1‰）；value 中保留 `en` 原文，碰撞時可人工比對。
 
@@ -78,3 +78,5 @@
 - **片語庫從三份 PDF 以座標解析建立，不用現成 NLP 套件**（`scripts/extract-phrase-lists.py`，2026-06-10）：OPAL Spoken（~250 phrases）、OPAL Written（~370 phrases）、Oxford Phrase List（750 phrases，A1–C1）格式相似，均為四欄排版（欄邊界 x ≈ 173/303/434 pt）。使用 pdfplumber `extract_words()` 取得每個詞的座標，按 `row_y` + `col` 分組拼接成行，不走 PDF 的原始文字流（可能排版混亂）。OPL 另用字型名稱（`UtopiaStd-Bold`）識別 CEFR 等級標記（A1/A2/B1/B2/C1），因 y 座標偵測在第 2–4 頁的等級行（y ≈ 114 pt）會被誤判為頁首 → 等級標記從不按 y 門檻過濾，只有非等級的片語內容才套用 y 範圍限制。片語正規化分四步：① 循環剝除開頭括弧前綴（最多 4 輪）；② 展開尾部可選詞（`as a result (of)` → 兩條目）；③ 剝除尾部代詞佔位符（sb/sth/yourself/oneself）；④ 以 ` / ` 拆分備選形式。最終 `phrase-list.json` 含 1,409 個不重複片語鍵。
 
 - **CLI 一律在 header 顯示執行指令與快取路徑**（`src/index.ts`，2026-06-09）：從 `process.argv.slice(2)` 重建執行指令字串（含空白的參數加引號），搭配 `WORD_CACHE_PATH` env（或預設 `~/.novel2anki`）計算快取目錄，在所有指令的 header 統一輸出。方便使用者確認當下執行的是哪一個 CSV 路徑，以及資料寫入哪個目錄，避免因快取路徑設定不同而導致資料寫錯位置。
+
+- **`SEMANTIC_PREPOSITIONS` 白名單允許有語意的介系詞進入初學者字卡**（`src/nlp/beginnerFilter.ts`，2026-06-10）：`CONTENT_POS` 原本排除所有 `Preposition`，導致 `against`（靠著）、`beneath`（在…下面）等帶有明確方位語意的介系詞一律被過濾。直接加入 `Preposition` 到 `CONTENT_POS` 過於粗糙（會放入 `per`、`via`（功能性）等不值得學習的介系詞）；stopWords 已涵蓋 `about`/`around`/`through`/`within`/`despite`/`upon` 等高頻虛詞，stopWords 裡的介系詞走 `not-stopword` 路徑，不受白名單影響。白名單僅需涵蓋「不在 stopWords 但有語意」的介系詞（目前 17 個：against、amid、amidst、beneath、beyond、beside、besides、except、unlike、via、across、along、among、amongst、opposite、underneath、versus）。POS 誤標（compromise 有時把 `against` 誤標為 `Adjective`）不影響白名單邏輯，誤標的詞走 `CONTENT_POS.has('Adjective')` 通過；只有正確標為 `Preposition` 時才走白名單例外。

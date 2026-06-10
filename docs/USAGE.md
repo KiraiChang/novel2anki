@@ -7,7 +7,7 @@
 cp .env.example .env
 # 編輯 .env，依需要填入：
 #   ANTHROPIC_API_KEY=sk-ant-...        ← 標準模式必填
-#   DEEPL_API_KEY=your-deepl-key        ← --deepl / --deepl-force 必填
+#   DEEPL_API_KEY=your-deepl-key        ← TRANSLATE_PROVIDER=deepl 時必填
 #   MW_API_KEY=your-mw-key              ← 選用，有設定時字典定義品質更佳
 #                                          申請：https://dictionaryapi.com/register/index
 
@@ -35,8 +35,8 @@ npx ts-node src/index.ts <輸入> [選項]
   --mock                  模擬模式：不呼叫 API，用文字分析產生字卡，並額外輸出 CSV
   --offline               離線模式：使用本機 Ollama 產生字卡（需先啟動 Ollama）
   --model <模型名稱>      指定 Ollama 模型（預設：llama3.2，也可設定 OLLAMA_MODEL）
-  --deepl                 使用 DeepL API 翻譯定義（需設定 DEEPL_API_KEY）
-  --deepl-force           強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）
+  --translate             批次翻譯 CSV 定義（後端依 TRANSLATE_PROVIDER 決定，預設 deepl）
+  --translate-force       強制重新翻譯（即使 CSV 已有翻譯內容也全部覆寫）
   --split-chapters        將 CSV 依章節分割輸出（搭配 --mock）
   --split-size <數量>     將 CSV 依每 N 個 chunk 分割輸出（搭配 --mock）
   --reading               讀書理解模式：產出術語、因果、章節脈絡、主題意象字卡
@@ -89,10 +89,10 @@ npx ts-node src/index.ts novel.epub --offline --chunks 3
 npx ts-node src/index.ts novel.epub --offline --model gemma3 --chunks 3
 
 # DeepL 翻譯模式（需設定 DEEPL_API_KEY）
-npx ts-node src/index.ts novel.epub --deepl --chunks 5
+npx ts-node src/index.ts novel.epub --translate --chunks 5
 
 # DeepL + Claude API 比對模式（同時產生比對 HTML）
-npx ts-node src/index.ts novel.epub --deepl --chunks 5
+npx ts-node src/index.ts novel.epub --translate --chunks 5
 
 # 讀書理解模式（mock）：產出 CSV + 互動預覽 HTML
 npx ts-node src/index.ts novel.epub --reading --mock --chunks 10
@@ -284,7 +284,7 @@ npx ts-node src/index.ts output/novel-beginner-words.csv -d "Novel" --flash
 
 #### DeepL 翻譯
 
-`--deepl` 只負責翻譯並覆寫 CSV，**不產生 APKG / HTML**，讓你確認所有分割檔都翻譯完後再統一合併。  
+`--translate` 只負責翻譯並覆寫 CSV，**不產生 APKG / HTML**，讓你確認所有分割檔都翻譯完後再統一合併。  
 翻譯時自動讀取同目錄的 `*-beginner-names.txt`，以預建名詞集保護人名（無此檔案時動態偵測）。
 
 ```bash
@@ -296,10 +296,10 @@ npx ts-node src/index.ts novel.epub --beginner --beginner-split 100
 
 # Step 2：整目錄翻譯（自動讀取 *-beginner-names.txt 保護人名）
 #         每次執行前顯示費用估算，輸入 [Y/n] 確認後才送出
-npx ts-node src/index.ts output/ -d "Novel" --deepl
+npx ts-node src/index.ts output/ -d "Novel" --translate
 # 或逐一翻譯各分割 CSV
-npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl
-npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --deepl
+npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --translate
+npx ts-node src/index.ts output/novel-beginner-words-part-02.csv -d "Novel" --translate
 
 # Step 3：所有 CSV 翻譯完成後，整目錄合併產出最終字卡
 npx ts-node src/index.ts output/ -d "Novel" --flash
@@ -307,14 +307,14 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 
 > **字典來源**：翻譯前會先從字典 API 取得英文定義再送 DeepL。有設定 `MW_API_KEY` 時使用 Merriam-Webster（品質較佳），否則使用 Free Dictionary API（dictionaryapi.dev）作為 fallback。
 >
-> `--deepl` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--deepl-force`：
+> `--translate` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--translate-force`：
 >
 > ```bash
 > # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
-> npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --deepl-force
+> npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --translate-force
 >
 > # 強制重新翻譯整個目錄的所有 words CSV
-> npx ts-node src/index.ts output/ -d "Novel" --deepl-force
+> npx ts-node src/index.ts output/ -d "Novel" --translate-force
 > ```
 
 ### 輸出檔案
@@ -324,7 +324,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
 | `*-beginner-words.csv` | 9 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
 | `*-beginner-words-part-NN.csv` | 9 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
-| `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--deepl` 自動讀取 |
+| `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--translate` 自動讀取 |
 
 **words CSV 欄位**（9 欄）：
 
@@ -373,7 +373,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 
 ## 翻譯後端切換
 
-`--deepl` 和 `--prefetch-cefr-zh` 都透過統一的翻譯層送出請求，可用 `TRANSLATE_PROVIDER` 環境變數切換後端，不需修改任何 CLI 指令。
+`--translate` 和 `--prefetch-cefr-zh` 都透過統一的翻譯層送出請求，可用 `TRANSLATE_PROVIDER` 環境變數切換後端，不需修改任何 CLI 指令。
 
 ```bash
 # .env 設定（選一種）
@@ -392,7 +392,7 @@ TRANSLATE_PROVIDER=claude    # Claude Haiku — ANTHROPIC_API_KEY 必填（複�
 
 ## CEFR 字庫預查工作流程
 
-CEFR 字庫（5,782 詞）的 MW 英文定義與繁體中文翻譯可分兩步批次建立，建完後 `--deepl` 翻譯時直接從快取讀取，不再查 API。
+CEFR 字庫（5,782 詞）的 MW 英文定義與繁體中文翻譯可分兩步批次建立，建完後 `--translate` 翻譯時直接從快取讀取，不再查 API。
 
 ### Step 1：批次預查 MW 英文定義（`--prefetch-cefr`）
 
@@ -427,14 +427,14 @@ Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬�
 | `word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
 | `word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
 | `word-cache-zh.json` | 翻譯後的繁體中文定義 | `--prefetch-cefr-zh` |
-| `sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--deepl` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
+| `sentence-cache.json` | 例句翻譯快取（FNV-1a hash → `{en, zh}`） | `--translate` 翻譯時自動存入；`--fill-sent-zh` 雙向同步 |
 | `cefr-wordlist.json` | CEFR 字庫（5,732 詞，A1–C2） | `scripts/build-cefr.js` 產生；若存在則優先讀此處 |
 | `phrase-list.json` | 學術／常見片語庫（1,409 條，含 OPAL / OPL 來源） | `scripts/extract-phrase-lists.py` 產生；若存在則優先讀此處 |
 | `phrase-cache.json` | MW 片語定義快取（命中與 no-def 均存） | `--prefetch-phrases` 建立；存在時自動跳過已查詢的片語 |
 
 ## 例句翻譯快取（`--fill-sent-zh`）
 
-`--deepl` 翻譯結束後，每筆例句翻譯會自動存入 `sentence-cache.json`（以例句 FNV-1a hash 為 key）。  
+`--translate` 翻譯結束後，每筆例句翻譯會自動存入 `sentence-cache.json`（以例句 FNV-1a hash 為 key）。  
 若之後有新的 beginner words CSV 尚未翻譯例句，可用 `--fill-sent-zh` 從快取補填，不需再呼叫翻譯 API：
 
 ```bash
@@ -452,7 +452,7 @@ npx ts-node src/index.ts output/ --fill-sent-zh
 
 ## 詞彙定義快取（`--fill-def-zh`）
 
-`--deepl` 翻譯後，每筆 `definition_zh` 可手動回寫至 `word-cache-zh.json`，讓未來其他書的同一詞彙直接讀快取而不需重翻。  
+`--translate` 翻譯後，每筆 `definition_zh` 可手動回寫至 `word-cache-zh.json`，讓未來其他書的同一詞彙直接讀快取而不需重翻。  
 也可將已有快取的空白列自動補填：
 
 ```bash

@@ -98,7 +98,7 @@ beginnerExporter.ts
     lemma | pos | cefr_level | coverage_rank | global_frequency |
     definition_en | context_sentence | context_sentence_zh | definition_zh
 
-  [選用] beginnerDeeplTranslator.ts（--mw / --deepl / --deepl-force / --update-dict）
+  [選用] beginnerTranslator.ts（--mw / --translate / --translate-force / --update-dict）
 
     estimateMWFetch(csvPaths)
       → { unfetchedCount }（統計尚未預查的列數）
@@ -150,7 +150,7 @@ beginnerExporter.ts
         definition_zh     ← defZh[j]（每列皆覆寫）
         context_sentence_zh ← sentZh[j]（已有內容跳過；force 模式強制覆寫）
 
-    --deepl-force：needTranslation = 全部列（不過濾已翻譯）
+    --translate-force：needTranslation = 全部列（不過濾已翻譯）
 
     updateWordDictFromCsv(csvPath, onProgress?)
       → 讀 CSV 的 definition_en 欄 → getWordCache().setDict(lemma, pos, defEn) → flush()
@@ -201,7 +201,7 @@ beginnerExporter.ts
 |------|------|------|
 | 主協調器 | `src/nlp/beginnerExtractor.ts` | 串接全書掃描 → 過濾 → 排序 → 例句選擇，對外單一入口 |
 | 全書詞頻 | `src/nlp/globalFreqAnalyzer.ts` | 跨 Chunk 詞頻統計，記錄每個 token 的 id 與所在句子；`extractSentences` 以 `.!?` 與 `\n` 雙重切割，避免詩節跨行被整段納入 |
-| 初學者過濾 | `src/nlp/beginnerFilter.ts` | 6 條規則過濾，每個被排除的詞記錄 reason 供驗證 |
+| 初學者過濾 | `src/nlp/beginnerFilter.ts` | 7 條規則過濾，每個被排除的詞記錄 reason 供驗證。`CONTENT_POS`（Noun/Verb/Adj/Adv 等）控制允許的詞性；`SEMANTIC_PREPOSITIONS` 白名單（against/amid/beneath/beyond 等 17 個）允許有語意的介系詞通過 `content-pos` 規則 |
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
 | 例句評分 | `src/nlp/sentenceScorer.ts` | Sentence Mining 評分：為每個詞選出「離開原書後仍能獨立理解且能推測詞義」的例句；對話句（引號 / em dash）`-5`、代詞開頭（He/She/They…）`-2`、說話動詞 `-1`、純敘述 `+2`、長度 40–120 `+5` |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
@@ -209,9 +209,9 @@ beginnerExporter.ts
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
 | NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫）、`protectNames()` / `restoreNames()`（`__PERSON_N__` 佔位符）、`saveNamesFile()` / `loadNamesFile()`（純文字 I/O） |
-| 翻譯管線 | `src/csv/beginnerDeeplTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV，例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath)`：雙向同步 `definition_zh` ↔ `word-cache-zh.json`（key: `lemma:pos`），邏輯與前者相同 |
+| 翻譯管線 | `src/csv/beginnerTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 覆寫 CSV，例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath)`：雙向同步 `definition_zh` ↔ `word-cache-zh.json`（key: `lemma:pos`），邏輯與前者相同 |
 | 翻譯補填 | `src/cards/translationFiller.ts` | `fillVocabTranslationsFromCache(cards, onProgress?)`：對所有 `VocabCard` 補填缺失欄位——`definition_zh` 空時查 `word-cache-zh.json`，`exampleZh` 空時查 `sentence-cache.json`；已有內容不覆寫。回傳 `FillResult { definitionFilled, exampleFilled }`。`onProgress(current, total)` 回呼供 CLI 即時進度顯示。beginner words / beginner tokens / CSV import / 主流程等 4 個輸出路徑均在輸出前呼叫 |
-| 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku）；`deeplTranslator.ts` 為薄包裝層，保持既有 import 路徑相容性 |
+| 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku） |
 | 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理五個快取——word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）/ sentence-cache.json（例句翻譯）/ phrase-cache.json（片語 MW 定義）；`get(word, pos)` / `getChinese(word, pos)` 各自採 `word:pos` → `word` fallback；`getSentenceZh(en)` / `setSentenceZh(en, zh)` 以 FNV-1a 32-bit hash 為 key；`getPhrase(phrase)` / `setPhrase(phrase, def, source)` / `hasPhrase(phrase)` 管理片語快取（命中與 no-def 均存）；dirty flag 延遲寫盤（`flush()`）。`getWordCache()` 模組層級 singleton。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫） |
 | CEFR 預查器 | `src/nlp/cefrPrefetcher.ts` | `prefetchCefrToWordCache()`：對 CEFR 字庫 5782 詞批次預查 MW，所有 POS 變體分別存入 `word-cache.json`，已快取詞自動跳過可重跑。`prefetchCefrZhToWordCache(config)`：讀取 `word-cache.json` 英文定義，批次翻譯後存入 `word-cache-zh.json`，同樣可中斷重跑。`prefetchPhrasesToCache()`：對 `phrase-list.json` 1409 個片語批次預查 MW，結果存入 `phrase-cache.json`；命中與 no-def 均快取，避免重複查詢 |
 
