@@ -28,7 +28,6 @@ import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, FillDefZhConfig } from './csv/beginnerTranslator';
 import { getWordCache } from './nlp/wordCache';
-import { fillVocabTranslationsFromCache } from './cards/translationFiller';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -500,18 +499,6 @@ program
 
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
 
-        // 回填快取翻譯（含進度）
-        console.log('');
-        const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
-          const pct = String(Math.round(cur / cnt * 100)).padStart(3);
-          const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
-          process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
-        });
-        if (csvCards.vocab.length === 0) console.log('');
-        if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
-          console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
-        }
-
         // 字彙統計（回填完成後顯示）
         const translatedPct = bwStats.total > 0 ? Math.round(bwStats.translated / bwStats.total * 100) : 0;
         const CEFR_ORDER = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'UNKNOWN'];
@@ -567,16 +554,6 @@ program
         const vocabCards = mergeTokensToVocabCards(tokens);
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
         console.log('');
-        const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
-          const pct = String(Math.round(cur / cnt * 100)).padStart(3);
-          const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
-          process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
-        });
-        if (csvCards.vocab.length === 0) console.log('');
-        if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
-          console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
-        }
-        console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
         const apkgPath = await exportToApkg(csvCards, deckName, options.output);
         const htmlPath = exportToHtml(csvCards, deckName, options.output);
@@ -600,16 +577,6 @@ program
       if (total === 0) {
         console.error(chalk.red('錯誤：CSV 中沒有可用的卡片資料。'));
         process.exit(1);
-      }
-      console.log('');
-      const fillResult = fillVocabTranslationsFromCache(csvCards, (cur, cnt) => {
-        const pct = String(Math.round(cur / cnt * 100)).padStart(3);
-        const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
-        process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
-      });
-      if (csvCards.vocab.length === 0) console.log('');
-      if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
-        console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
       }
       console.log(chalk.yellow('正在匯出檔案...'));
       const apkgPath = await exportToApkg(csvCards, deckName, options.output);
@@ -980,16 +947,6 @@ program
         cards.character = cards.character.filter(c => bestChunk.get(c.name)?.idx === idx);
       });
       allCards.character = chunkResults.flatMap(({ cards }) => cards.character);
-    }
-
-    const fillResult = fillVocabTranslationsFromCache(allCards, (cur, cnt) => {
-      const pct = String(Math.round(cur / cnt * 100)).padStart(3);
-      const line = `  補填快取翻譯... ${pct}% (${cur}/${cnt})`;
-      process.stdout.write(cur < cnt ? `\r${line}` : `\r${line}\n`);
-    });
-    if (allCards.vocab.length === 0) console.log('');
-    if (fillResult.definitionFilled > 0 || fillResult.exampleFilled > 0) {
-      console.log(chalk.green(`  ✓ 補填：definition_zh ${fillResult.definitionFilled} 筆 | exampleZh ${fillResult.exampleFilled} 筆`));
     }
 
     const total = allCards.vocab.length + allCards.cloze.length + allCards.character.length + allCards.plot.length;

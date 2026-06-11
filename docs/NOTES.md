@@ -87,7 +87,6 @@
 
 - **`sentence-cache.json` 與 `word-cache-zh.json` 獨立分離，不合併入同一檔案**（`src/nlp/wordCache.ts`，2026-06-09）：例句快取的 key 為 hash、value 含 `en`/`zh` 兩欄，與詞義快取（key=lemma:pos、value=翻譯字串）結構完全不同。分離可讓使用者獨立清空某一類快取、易於手動查閱，也使兩個 dirty flag 互不干擾。
 
-- **`fillVocabTranslationsFromCache` 統一呼叫點，不分散在各生成器**（`src/cards/translationFiller.ts`，2026-06-09）：`index.ts` 有 4 個獨立的輸出路徑（beginner words CSV 匯入、beginner tokens CSV 匯入、general CSV 匯入、主 PDF/EPUB 流程），每條路徑在輸出前各自呼叫 `fillVocabTranslationsFromCache`。若改在各生成器內部補填，新增生成器時容易遺漏；集中在輸出前作為後處理步驟，職責單純且易驗證。`FillResult` 返回值讓呼叫端決定是否顯示補填摘要，函式本身不耦合 UI 輸出。
 
 - **`WORD_CACHE_PATH` 同時控制使用者資料與參考資料的存取路徑**（`src/nlp/dataPath.ts`，2026-06-10）：原本 `WORD_CACHE_PATH` 只控制使用者資料（word-dict / word-cache / word-cache-zh / sentence-cache），`cefrLookup.ts` 與 `cefrPrefetcher.ts` 則用硬編碼的 `path.join(__dirname, '../data/cefr-wordlist.json')`。擴充後統一透過 `resolveDataPath(name)` 查找：先檢查 `$WORD_CACHE_PATH/<name>`，找不到退回 `src/data/<name>`。好處：使用者只需設定一個環境變數就能把所有可變資料（含 CEFR 字庫、片語庫）移到外部目錄；`src/data/` 整個加入 `.gitignore`，避免資料被意外提交。未設定 `WORD_CACHE_PATH` 時仍可從 `src/data/` 讀到內建資料，向下相容。選擇複用 `WORD_CACHE_PATH` 而非另立 `DATA_PATH`，是因為不希望 `.env.example` 多一個變數讓使用者困惑。
 
