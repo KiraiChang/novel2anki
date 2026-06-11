@@ -102,7 +102,8 @@ beginnerExporter.ts
 
   source 欄優先序：空(0) < cache(1) < deepl/azure/google/claude(2) < csv(3)
     --translate 翻譯後寫入 provider 名稱；--fill-sent-zh / --fill-def-zh cache→CSV
-    補填時，source 優先序 ≤ 1 才填入並寫 "cache"；舊 CSV（無 source 欄）自動插入
+    補填時，source 優先序 ≤ 1 才填入，並寫入快取條目中儲存的原始來源
+    （如 'deepl' / 'azure'；來源為 null 時退回 'cache'）；舊 CSV（無 source 欄）自動插入
 
   [選用] beginnerTranslator.ts（--mw / --translate / --translate-force / --update-dict）
 
@@ -226,7 +227,7 @@ beginnerExporter.ts
 | 翻譯管線 | `src/csv/beginnerTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 寫回 CSV（`definition_zh` 空白才寫入；`context_sentence_zh` 空白或 force 才寫入）；例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath, onProgress?, config?)`：雙向同步 `definition_zh` 與 `definition_en` ↔ 分層快取（book → domain → global）；`FillDefZhConfig { domain?, book? }` 控制啟用哪些層；zh 全局寫入限定 CEFR 已知詞（`setChinese`），en 全局寫入同條件（`setCache`）；book / domain zh 採 `setIfEmpty`，en 採 `setEnIfEmpty`（均不覆寫既有條目）；en cache → CSV fallback 使用 `wc.get(lemma, pos)?.def` |
 | 翻譯補填 | `src/cards/translationFiller.ts` | `fillVocabTranslationsFromCache(cards, onProgress?)`：對所有 `VocabCard` 補填缺失欄位——`definition_zh` 空時查 `word-cache-zh.json`，`exampleZh` 空時查 `sentence-cache.json`；已有內容不覆寫。回傳 `FillResult { definitionFilled, exampleFilled }`。`onProgress(current, total)` 回呼供 CLI 即時進度顯示。beginner words / beginner tokens / CSV import / 主流程等 4 個輸出路徑均在輸出前呼叫 |
 | 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku） |
-| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理五個快取——word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）/ sentence-cache.json（例句翻譯）/ phrase-cache.json（片語 MW 定義）；`get(word, pos)` / `getChinese(word, pos)` 各自採 `word:pos` → `word` fallback；`getSentenceZh(en)` / `setSentenceZh(en, zh)` 以 FNV-1a 32-bit hash 為 key；`getPhrase(phrase)` / `setPhrase(phrase, def, source)` / `hasPhrase(phrase)` 管理片語快取（命中與 no-def 均存）；dirty flag 延遲寫盤（`flush()`）；`cacheDir` getter 回傳快取目錄路徑（供 `DefinitionLayerCache` 建立同目錄的分層快取檔案）。`getWordCache()` 模組層級 singleton。`DefinitionLayerCache`：domain / book 專屬的雙語定義快取；zh 快取（`{type}_{name}_cache_zh.json`）結構同 `word-cache-zh.json`（`CacheZhEntry: {zh, source}`）；en 快取（`{type}_{name}_cache.json`）結構同 `word-cache.json`（`CacheEntry: {def, source}`）；讀取舊格式純字串時自動升級（`source: 'legacy'`）；`setIfEmpty(word, pos, zh)` / `setEnIfEmpty(word, pos, def, source)` 均採不覆寫語意；`getEn(word, pos)` 查詢英文定義；`enFilePath` 存放 en 快取路徑。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫） |
+| 個人單字庫 | `src/nlp/wordCache.ts` | `WordCacheManager`：管理五個快取——word-dict.json（精選）/ word-cache.json（MW 自動）/ word-cache-zh.json（中文翻譯）/ sentence-cache.json（例句翻譯）/ phrase-cache.json（片語 MW 定義）；`get(word, pos)` / `getChinese(word, pos)` / `getChineseSource(word, pos)` 各自採 `word:pos` → `word` fallback；`getSentenceZh(en)` / `getSentenceZhSource(en)` / `setSentenceZh(en, zh, source): boolean` 以 FNV-1a 32-bit hash 為 key，`setSentenceZh` 依優先序保護（新來源嚴格高於現有才覆蓋，現有 `''` 時無條件允許），回傳 `true` 表示實際寫入；`loadSentenceCache()` 舊條目缺 `source` 時自動補 `''`；`getPhrase(phrase)` / `setPhrase(phrase, def, source)` / `hasPhrase(phrase)` 管理片語快取（命中與 no-def 均存）；dirty flag 延遲寫盤（`flush()`）；`cacheDir` getter 回傳快取目錄路徑（供 `DefinitionLayerCache` 建立同目錄的分層快取檔案）。`getWordCache()` 模組層級 singleton。`DefinitionLayerCache`：domain / book 專屬的雙語定義快取；`get(word, pos)` / `getSource(word, pos)` 查詢 zh 及其來源；zh 快取（`{type}_{name}_cache_zh.json`）結構同 `word-cache-zh.json`（`CacheZhEntry: {zh, source}`）；en 快取（`{type}_{name}_cache.json`）結構同 `word-cache.json`（`CacheEntry: {def, source}`）；讀取舊格式純字串時自動升級（`source: 'legacy'`）；`setIfEmpty(word, pos, zh)` / `setEnIfEmpty(word, pos, def, source)` 均採不覆寫語意；`getEn(word, pos)` 查詢英文定義；`enFilePath` 存放 en 快取路徑。儲存位置：`~/.novel2anki/`（可用 `WORD_CACHE_PATH` env 覆寫） |
 | CEFR 預查器 | `src/nlp/cefrPrefetcher.ts` | `prefetchCefrToWordCache()`：對 CEFR 字庫 5782 詞批次預查 MW，所有 POS 變體分別存入 `word-cache.json`，已快取詞自動跳過可重跑。`prefetchCefrZhToWordCache(config)`：讀取 `word-cache.json` 英文定義，批次翻譯後存入 `word-cache-zh.json`，同樣可中斷重跑。`prefetchPhrasesToCache()`：對 `phrase-list.json` 1409 個片語批次預查 MW，結果存入 `phrase-cache.json`；命中與 no-def 均快取，避免重複查詢 |
 
 ## 核心型別
@@ -266,7 +267,9 @@ interface WordToken {
 }
 
 // 例句快取
-interface SentenceCacheEntry { en: string; zh: string; }
+interface SentenceCacheEntry { en: string; zh: string; source: string; }
+// source 同 source 欄優先序（'' / 'cache' / 'deepl' / 'azure' / 'google' / 'claude' / 'csv'）
+// 舊條目無 source 欄時 loadSentenceCache() 自動補 ''（priority 0，任何來源均可覆蓋）
 // key 為英文句子的 FNV-1a 32-bit hash（8 位 hex）
 type SentenceCacheData = Record<string, SentenceCacheEntry>;
 

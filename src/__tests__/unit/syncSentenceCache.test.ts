@@ -8,14 +8,16 @@ import { getWordCache } from '../../nlp/wordCache';
 
 // ── mock 設定 ─────────────────────────────────────────────────────────────────
 
-const mockSetSentenceZh = jest.fn<boolean, [string, string, string]>();
-const mockGetSentenceZh = jest.fn<string | null, [string]>();
-const mockFlush         = jest.fn<void, []>();
+const mockSetSentenceZh    = jest.fn<boolean, [string, string, string]>();
+const mockGetSentenceZh    = jest.fn<string | null, [string]>();
+const mockGetSentenceZhSrc = jest.fn<string | null, [string]>();
+const mockFlush            = jest.fn<void, []>();
 
 (getWordCache as jest.Mock).mockReturnValue({
-  setSentenceZh: mockSetSentenceZh,
-  getSentenceZh: mockGetSentenceZh,
-  flush:         mockFlush,
+  setSentenceZh:      mockSetSentenceZh,
+  getSentenceZh:      mockGetSentenceZh,
+  getSentenceZhSource: mockGetSentenceZhSrc,
+  flush:              mockFlush,
 });
 
 // ── 工具函式 ──────────────────────────────────────────────────────────────────
@@ -88,6 +90,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-sent-test-'));
   jest.clearAllMocks();
   mockGetSentenceZh.mockReturnValue(null);
+  mockGetSentenceZhSrc.mockReturnValue(null); // null → fallback to 'cache'
   mockSetSentenceZh.mockReturnValue(true);
 });
 
@@ -295,9 +298,24 @@ describe('syncSentenceCacheWithCsv — source priority protection', () => {
     expect(row[8]).toBe('cache');
   });
 
-  it('should write "cache" to source column after filling from cache', () => {
-    // Given
+  it('should write the actual cache entry source (e.g. deepl) to source column after filling', () => {
+    // Given: 快取有 deepl 翻譯，getSentenceZhSource 回傳 'deepl'
     mockGetSentenceZh.mockReturnValue('快取翻譯');
+    mockGetSentenceZhSrc.mockReturnValue('deepl');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ sentence: 'He ran fast.', sentenceZh: '', sentenceZhSrc: '' }),
+    ]);
+    // When
+    syncSentenceCacheWithCsv(csvPath);
+    // Then: source 欄反映快取中的原始來源，不是寫死的 'cache'
+    const row = readRow(csvPath, 0);
+    expect(row[8]).toBe('deepl'); // context_sentence_zh_source = 'deepl'
+  });
+
+  it('should fallback to "cache" as source when getSentenceZhSource returns null', () => {
+    // Given: getSentenceZhSource 回傳 null（舊條目或異常）
+    mockGetSentenceZh.mockReturnValue('快取翻譯');
+    mockGetSentenceZhSrc.mockReturnValue(null);
     const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
       makeRowWithSrc({ sentence: 'He ran fast.', sentenceZh: '', sentenceZhSrc: '' }),
     ]);
@@ -305,7 +323,7 @@ describe('syncSentenceCacheWithCsv — source priority protection', () => {
     syncSentenceCacheWithCsv(csvPath);
     // Then
     const row = readRow(csvPath, 0);
-    expect(row[8]).toBe('cache'); // context_sentence_zh_source = 'cache'
+    expect(row[8]).toBe('cache');
   });
 
   it('should NOT check source priority for old CSV without source column (backward compat)', () => {

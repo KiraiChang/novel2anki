@@ -107,6 +107,13 @@ export class WordCacheManager {
     return this.cacheZh[exact]?.zh ?? this.cacheZh[base]?.zh ?? null;
   }
 
+  /** 查找中文翻譯來源（快取中儲存的原始 source，如 'deepl'/'azure'） */
+  getChineseSource(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.cacheZh[exact]?.source ?? this.cacheZh[base]?.source ?? null;
+  }
+
   /** 精確比對 word:pos 是否已有中文翻譯（不走 fallback） */
   hasChinese(word: string, pos: string | null): boolean {
     return !!this.cacheZh[this.key(word, pos)];
@@ -190,6 +197,11 @@ export class WordCacheManager {
   /** 查找例句中文翻譯（以英文句子為 key，hash 查找） */
   getSentenceZh(en: string): string | null {
     return this.sentenceCache[fnv1a(en)]?.zh ?? null;
+  }
+
+  /** 查找例句翻譯來源（快取中儲存的原始 source，如 'deepl'/'azure'） */
+  getSentenceZhSource(en: string): string | null {
+    return this.sentenceCache[fnv1a(en)]?.source ?? null;
   }
 
   /**
@@ -365,6 +377,13 @@ export class DefinitionLayerCache {
     const exact = this.key(word, pos);
     const base  = this.key(word);
     return this.zhData[exact]?.zh ?? this.zhData[base]?.zh ?? null;
+  }
+
+  /** 查找中文翻譯來源（快取中儲存的原始 source，如 'deepl'/'azure'） */
+  getSource(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.zhData[exact]?.source ?? this.zhData[base]?.source ?? null;
   }
 
   /** 若 key 尚無中文定義則寫入，回傳是否實際寫入 */

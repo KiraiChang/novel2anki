@@ -12,20 +12,22 @@ import { getWordCache } from '../../nlp/wordCache';
 
 // ── mock 設定 ─────────────────────────────────────────────────────────────────
 
-const mockSetChinese = jest.fn<void, [string, string | null, string, string]>();
-const mockGetChinese = jest.fn<string | null, [string, string | null]>();
-const mockGet        = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
-const mockSetCache   = jest.fn<void, [string, string | null, string, string]>();
-const mockFlush      = jest.fn<void, []>();
+const mockSetChinese       = jest.fn<void, [string, string | null, string, string]>();
+const mockGetChinese       = jest.fn<string | null, [string, string | null]>();
+const mockGetChineseSource = jest.fn<string | null, [string, string | null]>();
+const mockGet              = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
+const mockSetCache         = jest.fn<void, [string, string | null, string, string]>();
+const mockFlush            = jest.fn<void, []>();
 
 let mockCacheDir: string;
 
 (getWordCache as jest.Mock).mockImplementation(() => ({
-  setChinese: mockSetChinese,
-  getChinese: mockGetChinese,
-  get:        mockGet,
-  setCache:   mockSetCache,
-  flush:      mockFlush,
+  setChinese:       mockSetChinese,
+  getChinese:       mockGetChinese,
+  getChineseSource: mockGetChineseSource,
+  get:              mockGet,
+  setCache:         mockSetCache,
+  flush:            mockFlush,
   get cacheDir() { return mockCacheDir; },
 }));
 
@@ -109,14 +111,16 @@ beforeEach(() => {
   mockCacheDir = tmpDir;
   jest.clearAllMocks();
   mockGetChinese.mockReturnValue(null);
+  mockGetChineseSource.mockReturnValue(null); // null → fallback to 'cache'
   mockGet.mockReturnValue(null);
   // re-apply implementation after clearAllMocks
   (getWordCache as jest.Mock).mockImplementation(() => ({
-    setChinese: mockSetChinese,
-    getChinese: mockGetChinese,
-    get:        mockGet,
-    setCache:   mockSetCache,
-    flush:      mockFlush,
+    setChinese:       mockSetChinese,
+    getChinese:       mockGetChinese,
+    getChineseSource: mockGetChineseSource,
+    get:              mockGet,
+    setCache:         mockSetCache,
+    flush:            mockFlush,
     get cacheDir() { return mockCacheDir; },
   }));
 });

@@ -630,7 +630,7 @@ export function syncSentenceCacheWithCsv(
       if (cached && sentZhColIdx !== undefined) {
         while (rows[i].length <= Math.max(sentZhColIdx, sentZhSrcColIdx ?? 0)) rows[i].push('');
         rows[i][sentZhColIdx] = cached;
-        if (sentZhSrcColIdx !== undefined) rows[i][sentZhSrcColIdx] = 'cache';
+        if (sentZhSrcColIdx !== undefined) rows[i][sentZhSrcColIdx] = wc.getSentenceZhSource(enSent) || 'cache';
         filledFromCache++;
         csvDirty = true;
         onProgress?.(i + 1, rows.length, 'filled');
@@ -752,15 +752,25 @@ export function syncDefinitionCacheWithCsv(
         zhBlocked = true;  // source 較高（deepl/csv 等），跳過不覆蓋
       } else {
         let cached: string | null = null;
-        if (bookCache)   cached ??= bookCache.get(lemma, pos);
-        if (domainCache) cached ??= domainCache.get(lemma, pos);
-        cached ??= wc.getChinese(lemma, pos);
+        let cachedSrc: string | null = null;
+        if (bookCache && !cached) {
+          cached = bookCache.get(lemma, pos);
+          if (cached) cachedSrc = bookCache.getSource(lemma, pos);
+        }
+        if (domainCache && !cached) {
+          cached = domainCache.get(lemma, pos);
+          if (cached) cachedSrc = domainCache.getSource(lemma, pos);
+        }
+        if (!cached) {
+          cached = wc.getChinese(lemma, pos);
+          if (cached) cachedSrc = wc.getChineseSource(lemma, pos);
+        }
 
         if (cached) {
           const maxIdx = Math.max(defZhColIdx, defZhSrcColIdx ?? 0);
           while (rows[i].length <= maxIdx) rows[i].push('');
           rows[i][defZhColIdx] = cached;
-          if (defZhSrcColIdx !== undefined) rows[i][defZhSrcColIdx] = 'cache';
+          if (defZhSrcColIdx !== undefined) rows[i][defZhSrcColIdx] = cachedSrc || 'cache';
           filledAny = true;
           csvDirty  = true;
         }
