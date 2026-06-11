@@ -32,9 +32,11 @@
 
 - [ ] **NAME_SKIP 抽離為使用者設定檔**（`src/nlp/nameProtector.ts`）：現行 `NAME_SKIP` 硬編碼於程式碼，新增頭銜或通稱需修改原始碼。應支援 `*-name-skip.txt`（或 domain/book 層的共用設定，一行一詞）讓使用者擴充過濾清單；程式端保留核心代名詞作為不可覆蓋的底層集合，使用者設定只做合併（union）不做替換。
 
-- [ ] **翻譯來源欄位 `definition_zh_source` / `context_sentence_zh_source`**（`src/csv/beginnerTranslator.ts`、`src/csv/beginnerExporter.ts`）：CSV 新增兩個 source 欄，記錄各列翻譯的來源（`deepl` / `azure` / `google` / `claude` / `cache` / `csv`）。`--fill-def-zh` / `--fill-sent-zh` 回填時依 source 欄判斷是否覆蓋（`cache` < `deepl`/`azure` < `csv` 優先序），避免低品質快取蓋掉人工校正；`--translate` 翻譯後自動寫入 source；舊 CSV（無 source 欄）沿用現有行為，不強制遷移。
+- [x] **翻譯來源欄位 `definition_zh_source` / `context_sentence_zh_source`**（`src/csv/beginnerTranslator.ts`、`src/csv/beginnerExporter.ts`，2026-06-11）：CSV 新增兩個 source 欄，記錄各列翻譯的來源（`deepl` / `azure` / `google` / `claude` / `cache` / `csv`）。`--fill-def-zh` / `--fill-sent-zh` 回填時依 source 欄判斷是否覆蓋（`cache` < `deepl`/`azure` < `csv` 優先序），避免低品質快取蓋掉人工校正；`--translate` 翻譯後自動寫入 source；舊 CSV（無 source 欄）沿用現有行為，不強制遷移。
 
 ## 翻譯品質改善（待規劃）
+
+- [ ] **雙向同步「有資料就略過」統一政策**（`src/csv/beginnerTranslator.ts`）：目前 CSV→cache 方向以 `setIfEmpty` 保護快取現有值；cache→CSV 方向以 source 優先序保護既有翻譯。兩者邏輯分散且語意略有差異，期望統一為：不論調整對象是 CSV 還是 cache，只要目標端已有資料，均以相同計數器語意標記略過，CLI 輸出的「快取已有」與「略過」計數語意更清晰。後續可考慮與 source 優先序整合，讓 CSV→cache 方向亦能依來源品質決定是否覆蓋。
 
 - [ ] **多後端翻譯比對 `--compare-trans`**：同批詞彙透過兩個翻譯提供者（如 DeepL + Azure）各跑一次，輸出對照表供人工審核，找出翻譯差異較大的詞彙集中修正。
 - [ ] **Claude 翻譯品質評分**：以 Claude API 對快取中的中文翻譯進行語義評分（0–10），低分詞彙標記為待複查；評分結果存入 `word-cache-zh.json` 的 `quality` 欄位。

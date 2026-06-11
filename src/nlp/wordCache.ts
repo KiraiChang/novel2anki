@@ -14,8 +14,13 @@ export interface CacheZhEntry { zh: string; source: string; example?: string; }
 type CacheZhData = Record<string, CacheZhEntry>;
 
 // sentence-cache.json：例句中文翻譯快取，key = FNV-1a 雜湊（8 字元 hex）
-export interface SentenceCacheEntry { en: string; zh: string; }
+export interface SentenceCacheEntry { en: string; zh: string; source: string; }
 type SentenceCacheData = Record<string, SentenceCacheEntry>;
+
+// 例句 source 優先序（空/舊條目 = 0 < cache = 1 < API 翻譯 = 2 < 人工 csv = 3）
+const SENTENCE_SOURCE_PRIORITY: Record<string, number> = {
+  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'csv': 3,
+};
 
 // phrase-cache.json：MW 片語定義快取（命中與 no-def 均存，避免重複查詢）
 interface PhraseCacheEntry { def: string; source: string; }
@@ -187,10 +192,21 @@ export class WordCacheManager {
     return this.sentenceCache[fnv1a(en)]?.zh ?? null;
   }
 
-  /** 寫入例句中文翻譯快取（in-memory，呼叫 flush() 才落盤） */
-  setSentenceZh(en: string, zh: string): void {
-    this.sentenceCache[fnv1a(en)] = { en, zh };
+  /**
+   * 寫入例句中文翻譯快取（in-memory，呼叫 flush() 才落盤）。
+   * 依 source 優先序保護：新來源優先序必須嚴格高於現有來源才覆蓋；
+   * 現有 source = '' 時（舊條目或未知來源）無條件允許覆蓋。
+   * 回傳 true 表示實際寫入，false 表示因優先序略過。
+   */
+  setSentenceZh(en: string, zh: string, source: string): boolean {
+    const hash = fnv1a(en);
+    const existing = this.sentenceCache[hash];
+    const existingPriority = SENTENCE_SOURCE_PRIORITY[existing?.source ?? ''] ?? 0;
+    const newPriority      = SENTENCE_SOURCE_PRIORITY[source] ?? 0;
+    if (existing && existingPriority !== 0 && newPriority <= existingPriority) return false;
+    this.sentenceCache[hash] = { en, zh, source };
     this.sentenceCacheDirty = true;
+    return true;
   }
 
   /** 查詢片語 MW 定義；回傳 null 表示尚未查過，回傳空字串表示 MW 無此片語 */
@@ -262,8 +278,15 @@ export class WordCacheManager {
 
   private loadSentenceCache(): SentenceCacheData {
     try {
-      if (fs.existsSync(this.sentenceCachePath))
-        return JSON.parse(fs.readFileSync(this.sentenceCachePath, 'utf-8')) as SentenceCacheData;
+      if (fs.existsSync(this.sentenceCachePath)) {
+        const raw = JSON.parse(fs.readFileSync(this.sentenceCachePath, 'utf-8')) as
+          Record<string, { en: string; zh: string; source?: string }>;
+        const normalized: SentenceCacheData = {};
+        for (const [k, v] of Object.entries(raw)) {
+          normalized[k] = { en: v.en, zh: v.zh, source: v.source ?? '' };
+        }
+        return normalized;
+      }
     } catch {}
     return {};
   }

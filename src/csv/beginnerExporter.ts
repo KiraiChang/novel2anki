@@ -31,7 +31,9 @@ function buildAiHint(token: WordToken, deckName: string): string {
 }
 
 const WORDS_HEADERS = [
-  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency', 'definition_en', 'context_sentence', 'context_sentence_zh', 'definition_zh',
+  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency', 'definition_en',
+  'context_sentence', 'context_sentence_zh', 'context_sentence_zh_source',
+  'definition_zh', 'definition_zh_source',
 ];
 
 export function exportBeginnerWordsSplit(
@@ -65,7 +67,9 @@ export function exportBeginnerWordsSplit(
         '',               // definition_en：留空供 MW 預查填入
         token.bestSentence,
         '',               // context_sentence_zh：留空供翻譯填入
+        '',               // context_sentence_zh_source
         token.definition_zh,
+        '',               // definition_zh_source
       ]));
     }
     fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
@@ -93,7 +97,9 @@ export function exportBeginnerWordsToCsv(
       '',               // definition_en：留空供 MW 預查填入
       token.bestSentence,
       '',               // context_sentence_zh：留空供翻譯填入
+      '',               // context_sentence_zh_source
       token.definition_zh,
+      '',               // definition_zh_source
     ]));
   }
 

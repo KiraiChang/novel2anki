@@ -9,6 +9,19 @@ const DEEPL_FREE_LIMIT = 500_000;
 const DEEPL_PRO_PRICE_PER_MILLION = 25;
 const DEEPL_BATCH_SIZE = 50;
 
+// ── 翻譯來源優先序 ────────────────────────────────────────────────────────────
+
+// 越高優先序越不應被低品質來源覆蓋
+// cache(1) < deepl/azure/google/claude(2) < csv(3)
+const SOURCE_PRIORITY: Record<string, number> = {
+  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'csv': 3,
+};
+
+// 回傳 true 表示可以用 cache 覆蓋（空 or cache 來源）
+function canFillFromCache(currentSource: string): boolean {
+  return (SOURCE_PRIORITY[currentSource.toLowerCase()] ?? 0) <= 1;
+}
+
 // ── CSV 解析工具 ─────────────────────────────────────────────────────────────
 
 function escapeField(value: string): string {
@@ -382,6 +395,22 @@ export async function translateBeginnerWordsCsv(
   // 解析所有資料列
   const rows = lines.slice(1).map(l => parseRow(l));
 
+  // 自動插入 source 欄（舊 CSV 無此欄時向後相容）
+  for (const [srcCol, afterCol] of [
+    ['context_sentence_zh_source', 'context_sentence_zh'],
+    ['definition_zh_source',       'definition_zh'       ],
+  ] as [string, string][]) {
+    if (idx[srcCol] === undefined) {
+      const insertAt = (idx[afterCol] ?? headers.length - 1) + 1;
+      headers.splice(insertAt, 0, srcCol);
+      for (const key of Object.keys(idx)) {
+        if ((idx as Record<string, number>)[key] >= insertAt) (idx as Record<string, number>)[key]++;
+      }
+      (idx as Record<string, number>)[srcCol] = insertAt;
+      for (const row of rows) row.splice(insertAt, 0, '');
+    }
+  }
+
   // 找出需要翻譯的列索引（force 模式對全部列重新翻譯）
   // 條件：definition_zh 或 context_sentence_zh 任一為空，均需翻譯
   const needTranslation = rows
@@ -447,18 +476,26 @@ export async function translateBeginnerWordsCsv(
 
   // Phase 3：填回資料列
   onProgress?.(0, 1, 'write');
-  const defZhColIdx = idx['definition_zh'];
-  const sentZhColIdx = idx['context_sentence_zh'];
+  const defZhColIdx     = (idx as Record<string, number>)['definition_zh'];
+  const sentZhColIdx    = (idx as Record<string, number>)['context_sentence_zh'];
+  const defZhSrcColIdx  = (idx as Record<string, number>)['definition_zh_source'];
+  const sentZhSrcColIdx = (idx as Record<string, number>)['context_sentence_zh_source'];
+  const provider        = config.provider;
 
   needTranslation.forEach(({ i }, j) => {
-    while (rows[i].length <= Math.max(defZhColIdx ?? 0, sentZhColIdx ?? 0)) {
-      rows[i].push('');
-    }
+    const maxIdx = Math.max(
+      defZhColIdx ?? 0, sentZhColIdx ?? 0,
+      defZhSrcColIdx ?? 0, sentZhSrcColIdx ?? 0,
+    );
+    while (rows[i].length <= maxIdx) rows[i].push('');
+
     if (defZhColIdx !== undefined && (options?.force || !rows[i][defZhColIdx]?.trim())) {
       rows[i][defZhColIdx] = defZh[j] ?? '';
+      if (defZhSrcColIdx !== undefined) rows[i][defZhSrcColIdx] = provider;
     }
     if (sentZhColIdx !== undefined && (options?.force || !rows[i][sentZhColIdx]?.trim())) {
       rows[i][sentZhColIdx] = sentZh[j] ?? '';
+      if (sentZhSrcColIdx !== undefined) rows[i][sentZhSrcColIdx] = provider;
     }
   });
 
@@ -467,7 +504,7 @@ export async function translateBeginnerWordsCsv(
   needTranslation.forEach(({ }, j) => {
     const enSent = sentences[j];
     const zhSent = sentZh[j];
-    if (enSent && zhSent) wc.setSentenceZh(enSent, zhSent);
+    if (enSent && zhSent) wc.setSentenceZh(enSent, zhSent, config.provider);
   });
 
   // 寫回檔案
@@ -552,8 +589,9 @@ export function syncSentenceCacheWithCsv(
   const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
   const rows = lines.slice(1).map(l => parseRow(l));
 
-  const sentEnColIdx  = idx['context_sentence'];
-  const sentZhColIdx  = idx['context_sentence_zh'];
+  const sentEnColIdx    = idx['context_sentence'];
+  const sentZhColIdx    = idx['context_sentence_zh'];
+  const sentZhSrcColIdx = idx['context_sentence_zh_source'];
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
   if (sentEnColIdx === undefined) {
@@ -568,13 +606,13 @@ export function syncSentenceCacheWithCsv(
   let csvDirty        = false;
 
   for (let i = 0; i < rows.length; i++) {
-    const enSent = get(rows[i], 'context_sentence').trim();
-    const zhSent = sentZhColIdx !== undefined ? get(rows[i], 'context_sentence_zh').trim() : '';
+    const enSent   = get(rows[i], 'context_sentence').trim();
+    const zhSent   = sentZhColIdx !== undefined ? get(rows[i], 'context_sentence_zh').trim() : '';
+    const zhSrc    = sentZhSrcColIdx !== undefined ? get(rows[i], 'context_sentence_zh_source').trim() : '';
 
     if (zhSent) {
-      // CSV → cache：快取尚無才存入，已有則略過
-      if (!wc.getSentenceZh(enSent)) {
-        wc.setSentenceZh(enSent, zhSent);
+      // CSV → cache：依 source 優先序決定是否覆蓋（setSentenceZh 內部判斷）
+      if (wc.setSentenceZh(enSent, zhSent, zhSrc || '')) {
         savedToCache++;
         onProgress?.(i + 1, rows.length, 'saved');
       } else {
@@ -582,11 +620,17 @@ export function syncSentenceCacheWithCsv(
         onProgress?.(i + 1, rows.length, 'skip');
       }
     } else if (enSent) {
-      // cache → CSV：嘗試從快取補填
+      // cache → CSV：嘗試從快取補填，但 source 優先序較高時不覆蓋
+      if (sentZhSrcColIdx !== undefined && !canFillFromCache(zhSrc)) {
+        noMatch++;
+        onProgress?.(i + 1, rows.length, 'skip');
+        continue;
+      }
       const cached = wc.getSentenceZh(enSent);
       if (cached && sentZhColIdx !== undefined) {
-        while (rows[i].length <= sentZhColIdx) rows[i].push('');
+        while (rows[i].length <= Math.max(sentZhColIdx, sentZhSrcColIdx ?? 0)) rows[i].push('');
         rows[i][sentZhColIdx] = cached;
+        if (sentZhSrcColIdx !== undefined) rows[i][sentZhSrcColIdx] = 'cache';
         filledFromCache++;
         csvDirty = true;
         onProgress?.(i + 1, rows.length, 'filled');
@@ -656,8 +700,9 @@ export function syncDefinitionCacheWithCsv(
   const rows = lines.slice(1).map(l => parseRow(l));
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
-  const defZhColIdx = idx['definition_zh'];
-  const defEnColIdx = idx['definition_en'];
+  const defZhColIdx    = idx['definition_zh'];
+  const defZhSrcColIdx = idx['definition_zh_source'];
+  const defEnColIdx    = idx['definition_en'];
   if (defZhColIdx === undefined) {
     return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
@@ -677,7 +722,8 @@ export function syncDefinitionCacheWithCsv(
     const pos       = get(rows[i], 'pos').trim() || null;
     const defZh     = get(rows[i], 'definition_zh').trim();
     const defEn     = defEnColIdx !== undefined ? get(rows[i], 'definition_en').trim() : '';
-    const cefrLevel = get(rows[i], 'cefr_level').trim();
+    const cefrLevel  = get(rows[i], 'cefr_level').trim();
+    const defZhSrc   = defZhSrcColIdx !== undefined ? get(rows[i], 'definition_zh_source').trim() : '';
 
     if (!lemma) {
       noMatch++;
@@ -686,8 +732,9 @@ export function syncDefinitionCacheWithCsv(
     }
 
     const cefrKnown = cefrLevel && cefrLevel !== 'UNKNOWN';
-    let wroteAny  = false;
-    let filledAny = false;
+    let wroteAny    = false;
+    let filledAny   = false;
+    let zhBlocked   = false;  // zh 被 source 優先序攔截，不計入 skippedCache
 
     // ── zh：CSV → cache ──────────────────────────────────────────────────────
     if (defZh) {
@@ -700,17 +747,23 @@ export function syncDefinitionCacheWithCsv(
         wroteAny = true;
       }
     } else {
-      // ── zh：cache → CSV ────────────────────────────────────────────────────
-      let cached: string | null = null;
-      if (bookCache)   cached ??= bookCache.get(lemma, pos);
-      if (domainCache) cached ??= domainCache.get(lemma, pos);
-      cached ??= wc.getChinese(lemma, pos);
+      // ── zh：cache → CSV，source 優先序保護 ────────────────────────────────
+      if (defZhSrcColIdx !== undefined && !canFillFromCache(defZhSrc)) {
+        zhBlocked = true;  // source 較高（deepl/csv 等），跳過不覆蓋
+      } else {
+        let cached: string | null = null;
+        if (bookCache)   cached ??= bookCache.get(lemma, pos);
+        if (domainCache) cached ??= domainCache.get(lemma, pos);
+        cached ??= wc.getChinese(lemma, pos);
 
-      if (cached) {
-        while (rows[i].length <= defZhColIdx) rows[i].push('');
-        rows[i][defZhColIdx] = cached;
-        filledAny = true;
-        csvDirty  = true;
+        if (cached) {
+          const maxIdx = Math.max(defZhColIdx, defZhSrcColIdx ?? 0);
+          while (rows[i].length <= maxIdx) rows[i].push('');
+          rows[i][defZhColIdx] = cached;
+          if (defZhSrcColIdx !== undefined) rows[i][defZhSrcColIdx] = 'cache';
+          filledAny = true;
+          csvDirty  = true;
+        }
       }
     }
 
@@ -746,10 +799,12 @@ export function syncDefinitionCacheWithCsv(
     } else if (filledAny) {
       filledFromCache++;
       onProgress?.(i + 1, rows.length, 'filled');
-    } else if (defZh || defEn) {
+    } else if ((defZh || defEn) && !zhBlocked) {
+      // zh/en 有值但快取已存在（setIfEmpty 略過）
       skippedCache++;
       onProgress?.(i + 1, rows.length, 'skip');
     } else {
+      // 空值、快取無命中，或 zh 被 source 優先序攔截
       noMatch++;
       onProgress?.(i + 1, rows.length, 'skip');
     }

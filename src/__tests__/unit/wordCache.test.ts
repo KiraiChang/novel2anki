@@ -336,7 +336,7 @@ describe('WordCacheManager', () => {
     it('should return stored translation for exact sentence', () => {
       // Given
       const wc = new WordCacheManager(tmpDir);
-      wc.setSentenceZh('He ran fast.', '他跑得很快。');
+      wc.setSentenceZh('He ran fast.', '他跑得很快。', 'deepl');
       // When / Then
       expect(wc.getSentenceZh('He ran fast.')).toBe('他跑得很快。');
     });
@@ -344,8 +344,8 @@ describe('WordCacheManager', () => {
     it('should treat different sentences as different keys', () => {
       // Given
       const wc = new WordCacheManager(tmpDir);
-      wc.setSentenceZh('He ran fast.', '他跑得很快。');
-      wc.setSentenceZh('She walked slowly.', '她走得很慢。');
+      wc.setSentenceZh('He ran fast.', '他跑得很快。', 'deepl');
+      wc.setSentenceZh('She walked slowly.', '她走得很慢。', 'deepl');
       // When / Then
       expect(wc.getSentenceZh('He ran fast.')).toBe('他跑得很快。');
       expect(wc.getSentenceZh('She walked slowly.')).toBe('她走得很慢。');
@@ -354,7 +354,7 @@ describe('WordCacheManager', () => {
     it('should persist to sentence-cache.json after flush and reload', () => {
       // Given
       const wc1 = new WordCacheManager(tmpDir);
-      wc1.setSentenceZh('The chapter began.', '這章開始了。');
+      wc1.setSentenceZh('The chapter began.', '這章開始了。', 'deepl');
       wc1.flush();
       // When
       const wc2 = new WordCacheManager(tmpDir);
@@ -362,20 +362,21 @@ describe('WordCacheManager', () => {
       expect(wc2.getSentenceZh('The chapter began.')).toBe('這章開始了。');
     });
 
-    it('should store en and zh in sentence-cache.json', () => {
+    it('should store en, zh and source in sentence-cache.json', () => {
       // Given
       const wc = new WordCacheManager(tmpDir);
-      wc.setSentenceZh('He ran fast.', '他跑得很快。');
+      wc.setSentenceZh('He ran fast.', '他跑得很快。', 'deepl');
       wc.flush();
       // When
       const raw = JSON.parse(fs.readFileSync(
         path.join(tmpDir, 'sentence-cache.json'), 'utf-8',
-      )) as Record<string, { en: string; zh: string }>;
+      )) as Record<string, { en: string; zh: string; source: string }>;
       const entries = Object.values(raw);
       // Then
       expect(entries).toHaveLength(1);
       expect(entries[0].en).toBe('He ran fast.');
       expect(entries[0].zh).toBe('他跑得很快。');
+      expect(entries[0].source).toBe('deepl');
     });
 
     it('should NOT write file when no setSentenceZh was called (dirty flag)', () => {
@@ -389,9 +390,61 @@ describe('WordCacheManager', () => {
     it('should increment sentenceCacheSize correctly', () => {
       const wc = new WordCacheManager(tmpDir);
       expect(wc.sentenceCacheSize).toBe(0);
-      wc.setSentenceZh('sent1', 'zh1');
-      wc.setSentenceZh('sent2', 'zh2');
+      wc.setSentenceZh('sent1', 'zh1', 'deepl');
+      wc.setSentenceZh('sent2', 'zh2', 'deepl');
       expect(wc.sentenceCacheSize).toBe(2);
+    });
+
+    it('should return true when write succeeds (new entry)', () => {
+      const wc = new WordCacheManager(tmpDir);
+      expect(wc.setSentenceZh('He ran.', '他跑。', 'deepl')).toBe(true);
+    });
+
+    it('should return true when overwriting with higher priority source (csv > deepl)', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran.', '他跑。', 'deepl');
+      expect(wc.setSentenceZh('He ran.', '他快速奔跑。', 'csv')).toBe(true);
+      expect(wc.getSentenceZh('He ran.')).toBe('他快速奔跑。');
+    });
+
+    it('should return false when existing source has higher priority (deepl > cache)', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran.', '他跑。', 'deepl');
+      expect(wc.setSentenceZh('He ran.', '快取翻譯', 'cache')).toBe(false);
+      expect(wc.getSentenceZh('He ran.')).toBe('他跑。'); // 保持原值
+    });
+
+    it('should return false when same-priority source tries to overwrite (deepl vs deepl)', () => {
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran.', '他跑。', 'deepl');
+      expect(wc.setSentenceZh('He ran.', '不同翻譯', 'deepl')).toBe(false);
+      expect(wc.getSentenceZh('He ran.')).toBe('他跑。');
+    });
+
+    it('should overwrite empty-source entry with any new source', () => {
+      // 舊條目無 source（讀入後補 ''），任何新來源都可覆蓋
+      const wc = new WordCacheManager(tmpDir);
+      wc.setSentenceZh('He ran.', '舊翻譯', '');
+      expect(wc.setSentenceZh('He ran.', '新翻譯', 'cache')).toBe(true);
+      expect(wc.getSentenceZh('He ran.')).toBe('新翻譯');
+    });
+
+    it('should normalize old entries without source field on load', () => {
+      // 手動寫入無 source 欄的舊格式 JSON
+      const cacheFile = path.join(tmpDir, 'sentence-cache.json');
+      fs.writeFileSync(cacheFile, JSON.stringify({
+        'aaaabbbb': { en: 'Old sentence.', zh: '舊翻譯。' },
+      }), 'utf-8');
+      const wc = new WordCacheManager(tmpDir);
+      // 舊條目仍可讀取
+      expect(wc.getSentenceZh('Old sentence.')).toBeNull(); // hash 不符，這裡只測 load 不 crash
+      // 驗證可以用新條目覆蓋（source=''，priority=0）
+      // 直接測重新 flush 後格式
+      wc.setSentenceZh('Old sentence.', '新翻譯。', 'deepl');
+      wc.flush();
+      const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, { source?: string }>;
+      // 原有 aaaabbbb key 仍存在（source 補 ''），新條目有 source='deepl'
+      expect(raw['aaaabbbb']?.source).toBe('');
     });
   });
 

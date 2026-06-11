@@ -57,6 +57,39 @@ function writeCsv(dir: string, name: string, rows: string[]): string {
   return csvPath;
 }
 
+const HEADERS_WITH_SRC = '"lemma","pos","cefr_level","coverage_rank","global_frequency","definition_en","context_sentence","context_sentence_zh","context_sentence_zh_source","definition_zh","definition_zh_source"';
+
+function makeRowWithSrc(fields: {
+  lemma?: string; pos?: string; cefrLevel?: string;
+  defEn?: string; sentence?: string; sentenceZh?: string; sentenceZhSrc?: string;
+  defZh?: string; defZhSrc?: string;
+}): string {
+  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  return [
+    fields.lemma        ?? 'word',
+    fields.pos          ?? 'Noun',
+    fields.cefrLevel    ?? 'B1',
+    '1', '100',
+    fields.defEn        ?? '',
+    fields.sentence     ?? '',
+    fields.sentenceZh   ?? '',
+    fields.sentenceZhSrc ?? '',
+    fields.defZh        ?? '',
+    fields.defZhSrc     ?? '',
+  ].map(esc).join(',');
+}
+
+function writeCsvWithSrc(dir: string, name: string, rows: string[]): string {
+  const csvPath = path.join(dir, name);
+  fs.writeFileSync(csvPath, [HEADERS_WITH_SRC, ...rows].join('\n'), 'utf-8');
+  return csvPath;
+}
+
+function readRow(csvPath: string, rowIdx: number): string[] {
+  const lines = fs.readFileSync(csvPath, 'utf-8').trim().split('\n');
+  return lines[rowIdx + 1].split(',').map(f => f.replace(/^"|"$/g, ''));
+}
+
 function readDefZh(csvPath: string): string[] {
   const lines = fs.readFileSync(csvPath, 'utf-8').trim().split('\n');
   return lines.slice(1).map(l => l.split(',').map(f => f.replace(/^"|"$/g, ''))[8]);
@@ -506,5 +539,120 @@ describe('syncDefinitionCacheWithCsv — CSV → en cache (write definition_en t
 
     const data = JSON.parse(fs.readFileSync(enFile, 'utf-8')) as Record<string, {def: string; source: string}>;
     expect(data['dactyl:noun'].def).toBe('old def');
+  });
+});
+
+// ── source 優先序保護（definition_zh_source 欄） ────────────────────────────────
+
+describe('syncDefinitionCacheWithCsv — source priority protection', () => {
+  it('should NOT fill from cache when source is "deepl" (higher priority)', () => {
+    // Given
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: 'deepl' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then: deepl 優先序 > cache，不覆蓋
+    expect(result.noMatch).toBe(1);
+    expect(result.filledFromCache).toBe(0);
+    const row = readRow(csvPath, 0);
+    expect(row[9]).toBe('');      // definition_zh 仍空
+    expect(row[10]).toBe('deepl'); // source 未被清除
+  });
+
+  it('should NOT fill from cache when source is "azure"', () => {
+    // Given
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: 'azure' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.noMatch).toBe(1);
+    expect(result.filledFromCache).toBe(0);
+  });
+
+  it('should NOT fill from cache when source is "csv" (highest priority)', () => {
+    // Given
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: 'csv' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.noMatch).toBe(1);
+  });
+
+  it('should fill from cache when source is "cache" (same level, refresh allowed)', () => {
+    // Given
+    mockGetChinese.mockReturnValue('新快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: 'cache' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.filledFromCache).toBe(1);
+    const row = readRow(csvPath, 0);
+    expect(row[9]).toBe('新快取翻譯');
+    expect(row[10]).toBe('cache');
+  });
+
+  it('should fill from cache when source is empty (no prior translation)', () => {
+    // Given
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.filledFromCache).toBe(1);
+    const row = readRow(csvPath, 0);
+    expect(row[9]).toBe('快取翻譯');
+    expect(row[10]).toBe('cache');
+  });
+
+  it('should write "cache" to definition_zh_source after filling from cache', () => {
+    // Given
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '', defZhSrc: '' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    const row = readRow(csvPath, 0);
+    expect(row[10]).toBe('cache');
+  });
+
+  it('should NOT check source priority for old CSV without source column (backward compat)', () => {
+    // Given: 舊格式，無 definition_zh_source 欄
+    mockGetChinese.mockReturnValue('快取翻譯');
+    const csvPath = writeCsv(tmpDir, 'old.csv', [
+      makeRow({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then: 無 source 欄，照舊補填
+    expect(result.filledFromCache).toBe(1);
+  });
+
+  it('should count as noMatch (not skippedCache) when source blocks fill, even if defEn is non-empty', () => {
+    // Given: defZh 空 + source='deepl'（攔截）+ defEn 有值
+    // skippedCache 的語意是「快取已有舊值」，不應把 source 攔截誤計入
+    mockGetChinese.mockReturnValue(null);
+    mockGet.mockReturnValue({ def: 'to sprint', tier: 'cache' }); // en cache 已有值（不寫入）
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defEn: '(verb) to run', defZh: '', defZhSrc: 'deepl' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then: source 攔截 + en cache 已有 → 計入 noMatch，不計入 skippedCache
+    expect(result.noMatch).toBe(1);
+    expect(result.skippedCache).toBe(0);
   });
 });

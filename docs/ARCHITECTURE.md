@@ -90,13 +90,19 @@ sentenceScorer.ts  ← 為每個詞從所有出現的句子中選最佳例句
   │
 beginnerExporter.ts
   ├─ *-beginner-tokens.csv（12 欄，完整元資料 + ai_hint）
-  ├─ *-beginner-words.csv（8 欄，含 global_frequency）  ← --beginner
-  ├─ *-beginner-words-part-NN.csv（8 欄，分割版）       ← --beginner-split N
-  └─ *-beginner-names.txt（純文字人名表）               ← --beginner（供翻譯前確認）
+  ├─ *-beginner-words.csv（11 欄，含 global_frequency）  ← --beginner
+  ├─ *-beginner-words-part-NN.csv（11 欄，分割版）       ← --beginner-split N
+  └─ *-beginner-names.txt（純文字人名表）                ← --beginner（供翻譯前確認）
 
-  words CSV 欄位（9 欄）：
+  words CSV 欄位（11 欄）：
     lemma | pos | cefr_level | coverage_rank | global_frequency |
-    definition_en | context_sentence | context_sentence_zh | definition_zh
+    definition_en | context_sentence |
+    context_sentence_zh | context_sentence_zh_source |
+    definition_zh | definition_zh_source
+
+  source 欄優先序：空(0) < cache(1) < deepl/azure/google/claude(2) < csv(3)
+    --translate 翻譯後寫入 provider 名稱；--fill-sent-zh / --fill-def-zh cache→CSV
+    補填時，source 優先序 ≤ 1 才填入並寫 "cache"；舊 CSV（無 source 欄）自動插入
 
   [選用] beginnerTranslator.ts（--mw / --translate / --translate-force / --update-dict）
 
@@ -151,8 +157,11 @@ beginnerExporter.ts
         結果拆分：偶數索引 → defZh[]；奇數索引 → sentZh[]（已還原人名）
 
       Phase 3 — 寫回 CSV
-        definition_zh     ← defZh[j]（空白才寫入；force 模式強制覆寫）
-        context_sentence_zh ← sentZh[j]（空白才寫入；force 模式強制覆寫）
+        definition_zh         ← defZh[j]（空白才寫入；force 模式強制覆寫）
+        definition_zh_source  ← config.provider（同上條件寫入）
+        context_sentence_zh   ← sentZh[j]（空白才寫入；force 模式強制覆寫）
+        context_sentence_zh_source ← config.provider（同上條件寫入）
+        舊 CSV（無 source 欄）→ 自動插入 source 欄（context 後；definition 後）
 
     needTranslation 過濾條件：definition_zh 空白 OR context_sentence_zh 空白（任一空白即納入翻譯）
     --translate-force：needTranslation = 全部列（不過濾已翻譯）
