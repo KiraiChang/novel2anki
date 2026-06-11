@@ -50,9 +50,60 @@ function wordStatToCsvRow(w: WordStat): string {
   ].map(escCsv).join(',');
 }
 
-function exportMissingCsv(words: WordStat[], outputPath: string): void {
-  const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...words.map(wordStatToCsvRow)];
-  fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+function exportMissingCsv(words: WordStat[], basePath: string, splitSize?: number): string[] {
+  if (!splitSize || splitSize <= 0 || words.length === 0) {
+    const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...words.map(wordStatToCsvRow)];
+    fs.writeFileSync(basePath, lines.join('\n'), 'utf-8');
+    return [basePath];
+  }
+  const total = Math.ceil(words.length / splitSize);
+  const pad = String(total).length < 2 ? 2 : String(total).length;
+  const ext = path.extname(basePath);
+  const base = basePath.slice(0, -ext.length);
+  const paths: string[] = [];
+  for (let i = 0; i < words.length; i += splitSize) {
+    const chunk = words.slice(i, i + splitSize);
+    const partNum = String(Math.floor(i / splitSize) + 1).padStart(pad, '0');
+    const filePath = `${base}-part-${partNum}${ext}`;
+    const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...chunk.map(wordStatToCsvRow)];
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+    paths.push(filePath);
+  }
+  return paths;
+}
+
+function buildPerFileMissingTable(words: WordStat[]): string {
+  const fileMap = new Map<string, { total: number; missingDefZh: number; missingCtxZh: number; missingDefEn: number }>();
+  for (const w of words) {
+    if (!fileMap.has(w.sourceFile)) fileMap.set(w.sourceFile, { total: 0, missingDefZh: 0, missingCtxZh: 0, missingDefEn: 0 });
+    const e = fileMap.get(w.sourceFile)!;
+    e.total++;
+    if (!w.definition_zh) e.missingDefZh++;
+    if (!w.context_sentence_zh) e.missingCtxZh++;
+    if (!w.definition_en) e.missingDefEn++;
+  }
+  if (fileMap.size === 0) return '';
+  const rows = [...fileMap.entries()].map(([file, s]) => `<tr>
+      <td>${fileChip(file)}</td>
+      <td class="num">${s.total.toLocaleString()}</td>
+      <td class="num${s.missingDefZh > 0 ? ' warn-cell' : ''}">${s.missingDefZh.toLocaleString()}</td>
+      <td class="num${s.missingCtxZh > 0 ? ' warn-cell' : ''}">${s.missingCtxZh.toLocaleString()}</td>
+      <td class="num${s.missingDefEn > 0 ? ' warn-cell' : ''}">${s.missingDefEn.toLocaleString()}</td>
+    </tr>`).join('\n');
+  return `<div class="section">
+    <h2>各 CSV 缺漏統計</h2>
+    <p class="section-sub">各來源檔案的翻譯缺漏數量一覽。</p>
+    <table>
+      <thead><tr>
+        <th>檔案</th>
+        <th class="num">詞彙數</th>
+        <th class="num">缺 definition_zh</th>
+        <th class="num">缺例句中文</th>
+        <th class="num">缺 definition_en</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 }
 
 function buildMissingDefZhRows(words: WordStat[]): string {
@@ -123,15 +174,16 @@ function missingSection(opts: {
 
 export interface BeginnerStatsExportResult {
   htmlPath: string;
-  missingDefZhPath: string;
-  missingCtxZhPath: string;
-  missingDefEnPath: string;
+  missingDefZhPaths: string[];
+  missingCtxZhPaths: string[];
+  missingDefEnPaths: string[];
 }
 
 export function exportBeginnerStatsToHtml(
   stats: BeginnerWordStats,
   deckName: string,
   outputDir: string,
+  options?: { splitSize?: number },
 ): BeginnerStatsExportResult {
   const translatedPct  = stats.total > 0 ? Math.round(stats.translated / stats.total * 100) : 0;
   const missingDefZh   = stats.total - stats.translated;
@@ -149,6 +201,8 @@ export function exportBeginnerStatsToHtml(
       const color = CEFR_COLOR[l];
       return `<div class="cefr-row"><span class="badge" style="background:${color}">${esc(l)}</span><span class="cefr-count">${cnt.toLocaleString()} 個</span><div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${color}"></div></div><span class="cefr-pct">${pct}%</span></div>`;
     }).join('\n');
+
+  const perFileMissingTable = buildPerFileMissingTable(stats.words);
 
   const allTableRows = stats.words.map(w => {
     const statusIcon  = w.translated ? '✓' : '—';
@@ -275,6 +329,7 @@ tr:hover td{background:#f8fafc}
 .untranslated .status{color:#cbd5e1}
 .file-chip{display:inline-block;font-size:11px;color:#6366f1;background:#eef2ff;padding:2px 8px;border-radius:4px;white-space:nowrap}
 .missing-zero{text-align:center;padding:32px;color:#94a3b8;font-size:13px}
+.warn-cell{color:#f97316;font-weight:600}
 .hidden{display:none}
 .nav-bar{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 32px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .nav-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;border:1px solid #e2e8f0;background:#f8fafc;color:#334155;cursor:pointer;transition:background .15s,border-color .15s}
@@ -337,6 +392,8 @@ tr:hover td{background:#f8fafc}
     <h2>CEFR 分佈</h2>
     ${cefrRows}
   </div>
+
+  ${perFileMissingTable}
 
   ${defZhMissingSection}
 
@@ -516,14 +573,15 @@ tr:hover td{background:#f8fafc}
   fs.mkdirSync(outputDir, { recursive: true });
 
   const htmlPath        = path.join(outputDir, `${slug}-beginner-stats.html`);
-  const missingDefZhPath = path.join(outputDir, `${slug}-missing-def-zh.csv`);
-  const missingCtxZhPath = path.join(outputDir, `${slug}-missing-ctx-zh.csv`);
-  const missingDefEnPath = path.join(outputDir, `${slug}-missing-def-en.csv`);
+  const missingDefZhBase = path.join(outputDir, `${slug}-missing-def-zh.csv`);
+  const missingCtxZhBase = path.join(outputDir, `${slug}-missing-ctx-zh.csv`);
+  const missingDefEnBase = path.join(outputDir, `${slug}-missing-def-en.csv`);
 
+  const splitSize = options?.splitSize;
   fs.writeFileSync(htmlPath, html, 'utf-8');
-  exportMissingCsv(stats.words.filter(w => !w.definition_zh),      missingDefZhPath);
-  exportMissingCsv(stats.words.filter(w => !w.context_sentence_zh), missingCtxZhPath);
-  exportMissingCsv(stats.words.filter(w => !w.definition_en),       missingDefEnPath);
+  const missingDefZhPaths = exportMissingCsv(stats.words.filter(w => !w.definition_zh),      missingDefZhBase, splitSize);
+  const missingCtxZhPaths = exportMissingCsv(stats.words.filter(w => !w.context_sentence_zh), missingCtxZhBase, splitSize);
+  const missingDefEnPaths = exportMissingCsv(stats.words.filter(w => !w.definition_en),       missingDefEnBase, splitSize);
 
-  return { htmlPath, missingDefZhPath, missingCtxZhPath, missingDefEnPath };
+  return { htmlPath, missingDefZhPaths, missingCtxZhPaths, missingDefEnPaths };
 }

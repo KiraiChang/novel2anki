@@ -53,7 +53,7 @@
   - **長度理想區間 40–120 +5**（原 30–100）：SM 需要足夠前後文供讀者推測詞義
   - 代詞開頭雖有 -2，但詞位置好可補回 +2，因此在候選句有限時仍可能被選中；有多個候選句時會輸給同分的無代詞敘述句
 
-- **初學者字彙統計 HTML 為自含式靜態頁面，同時匯出三個缺漏 CSV**：`exportBeginnerStatsToHtml` 回傳 `BeginnerStatsExportResult { htmlPath, missingDefZhPath, missingCtxZhPath, missingDefEnPath }`，一次寫出四個檔案。HTML 不依賴外部資源，可離線瀏覽；頁面包含：sticky 導覽列（三個缺漏 section 跳轉按鈕 + 缺漏數 badge）、5 張摘要卡片、CEFR 長條圖、**未翻譯單字**（缺 definition_zh）、**未翻譯例句**（缺 context_sentence_zh）、**未翻譯英文解釋**（缺 definition_en）三張缺漏表，以及完整詞彙列表；右下角浮動「回到頂端」按鈕（捲動 > 300px 顯示）。三個缺漏 CSV 各含 13 欄（原始 12 欄 + source_file 來源檔名），格式與 words CSV 相同，可直接編輯後以 `--update-dict` 或覆蓋原 CSV 方式回填。排序 / 搜尋邏輯以共用 `initTable()` 實作，數字欄 `parseFloat`、字串欄 `localeCompare('zh-TW')`。
+- **初學者字彙統計 HTML 為自含式靜態頁面，同時匯出三個缺漏 CSV**：`exportBeginnerStatsToHtml(stats, deckName, outputDir, options?)` 接受 `options.splitSize` 控制缺漏 CSV 分割大小，回傳 `BeginnerStatsExportResult { htmlPath, missingDefZhPaths, missingCtxZhPaths, missingDefEnPaths }`（三個 paths 為 `string[]`），一次寫出 HTML + 3×N 個 CSV 檔案。HTML 不依賴外部資源，可離線瀏覽；頁面包含：sticky 導覽列（三個缺漏 section 跳轉按鈕 + 缺漏數 badge）、5 張摘要卡片、CEFR 長條圖、**各 CSV 缺漏統計表**（來源檔名 / 詞彙數 / 缺 definition_zh / 缺例句中文 / 缺 definition_en，非零值橘色標示）、**未翻譯單字**（缺 definition_zh）、**未翻譯例句**（缺 context_sentence_zh）、**未翻譯英文解釋**（缺 definition_en）三張缺漏表，以及完整詞彙列表；右下角浮動「回到頂端」按鈕（捲動 > 300px 顯示）。三個缺漏 CSV 各含 13 欄（原始 12 欄 + source_file 來源檔名），格式與 words CSV 相同，可直接編輯後以 `--update-dict` 或覆蓋原 CSV 方式回填。`--missing-split N` 時，缺漏 CSV 以 `{base}-part-01.csv`、`{base}-part-02.csv`…分割（零補位位數依缺漏總數決定）。排序 / 搜尋邏輯以共用 `initTable()` 實作，數字欄 `parseFloat`、字串欄 `localeCompare('zh-TW')`。
 
 - **初學者模式匯入不過濾空翻譯**：`beginnerImporter.ts` 的三個函式（`importBeginnerWords`、`importBeginnerWordsFromFiles`、`mergeTokensToVocabCards`）不再過濾 `definition_zh` 為空的列。未翻譯的單字也會合併成 VocabCard，Anki 字卡背面定義欄位顯示空白，讓使用者可以在不完整翻譯的情況下仍能匯出並學習例句。
 

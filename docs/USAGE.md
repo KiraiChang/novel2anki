@@ -46,6 +46,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --beginner-min-freq <N> 詞彙最低出現次數（預設：2）
   --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
   --beginner-split <N>    將翻譯 CSV 分割為每 N 個詞彙一個檔案（搭配 --beginner）
+  --missing-split <N>     將缺漏 CSV 每 N 筆分割為一個檔案（搭配 beginner words CSV 匯出統計）
   --mw                    MW 預查：預先查詢英文定義寫入 CSV 的 definition_en 欄（需設定 MW_API_KEY）
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
