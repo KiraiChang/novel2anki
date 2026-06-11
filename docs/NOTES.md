@@ -53,7 +53,7 @@
   - **長度理想區間 40–120 +5**（原 30–100）：SM 需要足夠前後文供讀者推測詞義
   - 代詞開頭雖有 -2，但詞位置好可補回 +2，因此在候選句有限時仍可能被選中；有多個候選句時會輸給同分的無代詞敘述句
 
-- **初學者字彙統計 HTML 為自含式靜態頁面**：`beginnerStatsExporter.ts` 產生的 HTML 不依賴任何外部資源（CDN、框架），所有樣式與 JS 內嵌，可離線瀏覽。排序邏輯在瀏覽器端以 vanilla JS 實作（約 40 行），數字欄（排名、出現次數）用 `parseFloat` 判斷，字串欄用 `localeCompare('zh-TW')`。詞彙表來自 words CSV 的 `global_frequency` 欄；舊版 CSV（7 欄，無 `global_frequency`）讀到的頻率為 0，需重新跑 `--beginner` 產生 8 欄 CSV 後才能正確顯示。
+- **初學者字彙統計 HTML 為自含式靜態頁面**：`beginnerStatsExporter.ts` 產生的 HTML 不依賴任何外部資源（CDN、框架），所有樣式與 JS 內嵌，可離線瀏覽。頁面包含五個區塊：5 張摘要卡片（總數 / 已翻譯 / 缺 definition_zh / 缺 definition_en / 缺例句中文）、CEFR 長條圖、**未翻譯單字**表（只顯示 definition_zh 空白的列）、**未翻譯例句**表（只顯示 context_sentence_zh 空白的列）、完整詞彙列表。前兩個缺漏表均顯示來源 CSV 檔名標籤，方便對照編輯。排序 / 搜尋邏輯以共用 `initTable()` 實作，數字欄用 `parseFloat`、字串欄用 `localeCompare('zh-TW')`。
 
 - **初學者模式匯入不過濾空翻譯**：`beginnerImporter.ts` 的三個函式（`importBeginnerWords`、`importBeginnerWordsFromFiles`、`mergeTokensToVocabCards`）不再過濾 `definition_zh` 為空的列。未翻譯的單字也會合併成 VocabCard，Anki 字卡背面定義欄位顯示空白，讓使用者可以在不完整翻譯的情況下仍能匯出並學習例句。
 

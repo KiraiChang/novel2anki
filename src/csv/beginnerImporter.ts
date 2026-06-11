@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { WordToken, CefrLevel } from '../nlp/types';
 import { VocabCard } from '../cards/types';
 
@@ -166,6 +167,10 @@ export interface WordStat {
   frequency: number;
   translated: boolean;
   definition_zh: string;
+  definition_en: string;
+  context_sentence: string;
+  context_sentence_zh: string;
+  sourceFile: string;
 }
 
 export interface BeginnerWordStats {
@@ -175,12 +180,16 @@ export interface BeginnerWordStats {
   rankMin: number;
   rankMax: number;
   words: WordStat[];
+  missingDefEn: number;
+  missingContextZh: number;
 }
 
 export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats {
   const seen = new Set<string>();
   let total = 0;
   let translated = 0;
+  let missingDefEn = 0;
+  let missingContextZh = 0;
   const cefrDist: Record<string, number> = {};
   let rankMin = Infinity;
   let rankMax = 0;
@@ -194,6 +203,7 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
 
     const headers = parseRow(lines[0]);
     const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+    const sourceFile = path.basename(csvPath);
 
     for (let i = 1; i < lines.length; i++) {
       const cols = parseRow(lines[i]);
@@ -203,8 +213,13 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
       seen.add(lemma);
 
       total++;
-      const def = get('definition_zh').trim();
-      if (def) translated++;
+      const def_zh = get('definition_zh').trim();
+      const def_en = get('definition_en').trim();
+      const ctx_sent = get('context_sentence').trim();
+      const ctx_zh = get('context_sentence_zh').trim();
+      if (def_zh) translated++;
+      if (!def_en) missingDefEn++;
+      if (!ctx_zh) missingContextZh++;
       const cefr = get('cefr_level').trim() || 'UNKNOWN';
       cefrDist[cefr] = (cefrDist[cefr] ?? 0) + 1;
       const rank = parseInt(get('coverage_rank'), 10) || 0;
@@ -213,12 +228,17 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
         rankMin = Math.min(rankMin, rank);
         rankMax = Math.max(rankMax, rank);
       }
-      words.push({ lemma, pos: get('pos').trim(), cefr, rank, frequency, translated: !!def, definition_zh: def });
+      words.push({
+        lemma, pos: get('pos').trim(), cefr, rank, frequency,
+        translated: !!def_zh, definition_zh: def_zh,
+        definition_en: def_en, context_sentence: ctx_sent,
+        context_sentence_zh: ctx_zh, sourceFile,
+      });
     }
   }
 
   words.sort((a, b) => a.rank - b.rank);
-  return { total, translated, cefrDist, rankMin: isFinite(rankMin) ? rankMin : 0, rankMax, words };
+  return { total, translated, cefrDist, rankMin: isFinite(rankMin) ? rankMin : 0, rankMax, words, missingDefEn, missingContextZh };
 }
 
 export function mergeTokensToVocabCards(tokens: WordToken[]): VocabCard[] {
