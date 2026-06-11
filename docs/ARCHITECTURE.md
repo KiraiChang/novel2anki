@@ -181,21 +181,27 @@ beginnerExporter.ts
     computeBeginnerWordStats(csvPaths)
       → BeginnerWordStats { total, translated, missingDefEn, missingContextZh, cefrDist, rankMin, rankMax, words: WordStat[] }
       （讀 lemma / pos / cefr_level / coverage_rank / global_frequency /
-         definition_zh / definition_en / context_sentence / context_sentence_zh，依 coverage_rank 排序）
+         definition_zh / definition_zh_source / definition_en / definition_en_source /
+         context_sentence / context_sentence_zh / context_sentence_zh_source，依 coverage_rank 排序）
       WordStat 另記 sourceFile（來源 CSV 檔名，basename）
 
     exportBeginnerStatsToHtml(stats, deckName, outputDir)
-      → *-beginner-stats.html（自含式 HTML，包含）
-        ① 摘要卡片 5 張：總數 / 已翻譯（%）/ 缺 definition_zh / 缺 definition_en / 缺例句中文
-        ② CEFR 分佈長條圖（A1–C2 + UNKNOWN，各級配色）
-        ③ 未翻譯單字：只顯示 definition_zh 空白的列
-           ↳ 欄位：排名 / 單字 / 詞性 / CEFR / 英文例句 / 來源檔案
-           ↳ 搜尋（單字 + 例句）、CEFR 篩選、欄位點擊排序
-        ④ 未翻譯例句：只顯示 context_sentence_zh 空白的列
-           ↳ 欄位：排名 / 單字 / definition_zh / 英文例句 / CEFR / 來源檔案
-           ↳ 搜尋（單字 + 例句 + 定義）、CEFR 篩選、欄位點擊排序
-        ⑤ 完整詞彙列表：排名 / 單字 / 詞性 / CEFR / 出現次數 / 定義 / 已譯
-           ↳ 欄位點擊排序、搜尋框、CEFR 篩選、翻譯狀態篩選
+      → BeginnerStatsExportResult { htmlPath, missingDefZhPath, missingCtxZhPath, missingDefEnPath }
+      同時寫出四個檔案：
+        *-beginner-stats.html（自含式 HTML）
+          ① sticky 導覽列：「未翻譯單字（中文）N筆」/「未翻譯例句（中文）N筆」/「未翻譯英文解釋 N筆」跳轉按鈕
+          ② 摘要卡片 5 張：總數 / 已翻譯（%）/ 缺 definition_zh / 缺 definition_en / 缺例句中文
+          ③ CEFR 分佈長條圖（A1–C2 + UNKNOWN，各級配色）
+          ④ 未翻譯單字（缺 definition_zh）：排名 / 單字 / 詞性 / CEFR / 英文例句 / 來源檔案
+          ⑤ 未翻譯例句（缺 context_sentence_zh）：排名 / 單字 / definition_zh / 英文例句 / CEFR / 來源檔案
+          ⑥ 未翻譯英文解釋（缺 definition_en）：排名 / 單字 / 詞性 / CEFR / 英文例句 / 來源檔案
+          ⑦ 完整詞彙列表：排名 / 單字 / 詞性 / CEFR / 出現次數 / 定義 / 已譯
+             ↳ 各缺漏表：搜尋（單字 + 例句 + 定義）、CEFR 篩選、欄位點擊排序
+          ↳ 回到頂端浮動按鈕（捲動 > 300px 顯示）
+        *-missing-def-zh.csv（缺 definition_zh 的完整原始列 + source_file 欄）
+        *-missing-ctx-zh.csv（缺 context_sentence_zh 的完整原始列 + source_file 欄）
+        *-missing-def-en.csv（缺 definition_en 的完整原始列 + source_file 欄）
+      三個 CSV 格式（13 欄）：原始 12 欄 + source_file
 ```
 
 ## 模組職責
@@ -235,8 +241,8 @@ beginnerExporter.ts
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
 | 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（12 欄，含 `definition_en` / `definition_en_source` 預查欄）+ 分割版 words CSV + `*-beginner-names.txt`（人名表）+ `*-normalize.json`（古語正規化對照表）。`exportBeginnerNormalizeFile(tokens, deckName, outputDir)`：收集 UNKNOWN 詞彙，對照 `archaic-en.json` 自動補入命中條目，寫出 `{slug}-normalize.json` 至 output 目錄。`loadBeginnerNormalizeMap(outputDir, deckName)`：讀取 `{slug}-normalize.json`，回傳 `Map<string, string>` 供 `--beginner` 掃描前套用 |
 | Token 正規化 | `src/nlp/tokenNormalizer.ts` | 方言 / 古語變體正規化。`loadNormalizeFile(filePath)`：載入 JSON 對照表為 `Map<string, string>`。`loadArchaicMap()`：透過 `resolveDataPath('archaic-en.json')` 讀取內建古語表。`findNormalizeFile(dir, slug?)`：在目錄中尋找 `*-normalize.json`，slug 已知時優先精確比對。`slugFromCsvPath(csvPath)`：從 `*-beginner-words-*.csv` 檔名提取 slug。`applyNormalization(text, map)`：以非字母邊界 regex（`(?<![a-zA-Z])…(?![a-zA-Z])`）case-insensitive 替換，可處理 `'tis` 等含標點前綴的形式。`exportNormalizeFile(unknownWords, archaicMap, outputPath)`：保留既有條目（不覆蓋人工修改），補入新命中，回傳 `NormalizeFileResult { outputPath, matched, suggestions }` |
-| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`，每筆附 `definition_en`、`context_sentence`、`context_sentence_zh`、`sourceFile`；整體附 `missingDefEn`、`missingContextZh` 計數） |
-| 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（5 張摘要卡 + CEFR 長條圖 + **未翻譯單字**表 + **未翻譯例句**表 + 完整詞彙列表），各表可搜尋/篩選/排序，來源 CSV 檔名顯示為標籤，匯出為 `*-beginner-stats.html` |
+| 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`，每筆附所有翻譯欄位及來源欄位與 `sourceFile`；整體附 `missingDefEn`、`missingContextZh` 計數） |
+| 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → `BeginnerStatsExportResult { htmlPath, missingDefZhPath, missingCtxZhPath, missingDefEnPath }`；同時匯出自含式 HTML（sticky 導覽 + 3 張缺漏表 + 完整列表）與三個缺漏 CSV（13 欄原始資料 + source_file），各 CSV 對應一類缺漏 |
 | NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫；`NAME_SKIP` 小寫儲存，涵蓋代名詞、宗教/軍事/封建頭銜）、`protectNames()` / `restoreNames(translated, restoreMap, translationMap?)`（`__PERSON_N__` 佔位符；有 translationMap 時優先替換為中文音譯，否則還原英文原名）、`saveNamesFile()`（保留現有 mapping，只補新名詞）/ `loadNamesFile()`（回傳 `Map<string, string>`，支援 `English: 中文` 或純英文格式） |
 | 翻譯管線 | `src/csv/beginnerTranslator.ts` | MW 預查 + 多後端翻譯三階段管線。`fetchBeginnerWordsMW`：查三層快取（word-dict → word-cache → MW API），將英文定義寫入 `definition_en`。`translateBeginnerWordsCsv`：Phase 1 優先讀 `definition_en` 跳過 API 呼叫；Phase 2 NER 人名保護 + 交錯批次翻譯（`[def1,sent1,…]`，每批 25 詞對）+ 還原人名；Phase 3 寫回 CSV（`definition_zh` 空白才寫入；`context_sentence_zh` 空白或 force 才寫入）；例句翻譯同步存入 `sentence-cache.json`。`updateWordDictFromCsv`：把 CSV 的 `definition_en` 升級到 `word-dict.json`（個人精選庫）。`syncSentenceCacheWithCsv(csvPath)`：雙向同步 `context_sentence_zh` ↔ `sentence-cache.json`，僅在有列被填入時重寫 CSV。`syncDefinitionCacheWithCsv(csvPath, onProgress?, config?)`：雙向同步 `definition_zh` / `definition_en` / `definition_en_source` ↔ 分層快取（book → domain → global）；`FillDefZhConfig { domain?, book? }` 控制啟用哪些層；zh 全局寫入限定 CEFR 已知詞（`setChinese`），en 全局寫入同條件（`setCache`）；book / domain zh 採 `setIfEmpty(word, pos, zh, zhSource)`，en 採 `setEnIfEmpty(word, pos, def, source)`（均不覆寫既有條目）；`defZhSrc` 與 `defEnSrc` 從 CSV 讀出並原樣傳入（避免來源升格）；en cache → CSV 時以 `getEnSource()` 取得各層真實來源，寫入 `definition_en_source` 欄 |
 | 翻譯後端 | `src/cards/translator.ts` | 多後端統一介面。`TranslatorConfig { provider, apiKey, region? }`；`loadTranslatorConfig()` 讀取 `TRANSLATE_PROVIDER` env（預設 `deepl`）；`batchTranslate(texts, config)` 路由到對應後端（deepl-node / Google REST / Azure REST / Claude Haiku） |
@@ -307,8 +313,10 @@ interface WordStat {
   lemma: string; pos: string; cefr: string;
   rank: number; frequency: number;
   translated: boolean;
-  definition_zh: string; definition_en: string;
-  context_sentence: string; context_sentence_zh: string;
+  definition_zh: string;        definition_zh_source: string;
+  definition_en: string;        definition_en_source: string;
+  context_sentence: string;
+  context_sentence_zh: string;  context_sentence_zh_source: string;
   sourceFile: string;   // 來源 CSV 檔名（basename）
 }
 interface BeginnerWordStats {
@@ -317,6 +325,12 @@ interface BeginnerWordStats {
   cefrDist: Record<string, number>;
   rankMin: number; rankMax: number;
   words: WordStat[];   // 依 coverage_rank 排序
+}
+interface BeginnerStatsExportResult {   // beginnerStatsExporter.ts
+  htmlPath: string;
+  missingDefZhPath: string;   // *-missing-def-zh.csv
+  missingCtxZhPath: string;   // *-missing-ctx-zh.csv
+  missingDefEnPath: string;   // *-missing-def-en.csv
 }
 ```
 

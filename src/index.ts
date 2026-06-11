@@ -495,7 +495,7 @@ program
 
         // 字彙統計（預先計算，顯示移至回填後）
         const bwStats = computeBeginnerWordStats(beginnerWordsCsvs);
-        const statsHtmlPath = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
+        const statsResult = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
 
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
 
@@ -523,7 +523,13 @@ program
           console.log(statSep);
           console.log(`覆蓋率排名：#${bwStats.rankMin} – #${bwStats.rankMax}`);
         }
-        console.log(chalk.green(`✓ 字彙統計 HTML：${statsHtmlPath}`));
+        console.log(chalk.green(`✓ 字彙統計 HTML：${statsResult.htmlPath}`));
+        if (bwStats.total - bwStats.translated > 0)
+          console.log(chalk.gray(`  缺中文翻譯：  ${statsResult.missingDefZhPath}`));
+        if (bwStats.missingContextZh > 0)
+          console.log(chalk.gray(`  缺例句中文：  ${statsResult.missingCtxZhPath}`));
+        if (bwStats.missingDefEn > 0)
+          console.log(chalk.gray(`  缺英文解釋：  ${statsResult.missingDefEnPath}`));
 
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));

@@ -167,9 +167,12 @@ export interface WordStat {
   frequency: number;
   translated: boolean;
   definition_zh: string;
+  definition_zh_source: string;
   definition_en: string;
+  definition_en_source: string;
   context_sentence: string;
   context_sentence_zh: string;
+  context_sentence_zh_source: string;
   sourceFile: string;
 }
 
@@ -213,10 +216,13 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
       seen.add(lemma);
 
       total++;
-      const def_zh = get('definition_zh').trim();
-      const def_en = get('definition_en').trim();
-      const ctx_sent = get('context_sentence').trim();
-      const ctx_zh = get('context_sentence_zh').trim();
+      const def_zh      = get('definition_zh').trim();
+      const def_zh_src  = get('definition_zh_source').trim();
+      const def_en      = get('definition_en').trim();
+      const def_en_src  = get('definition_en_source').trim();
+      const ctx_sent    = get('context_sentence').trim();
+      const ctx_zh      = get('context_sentence_zh').trim();
+      const ctx_zh_src  = get('context_sentence_zh_source').trim();
       if (def_zh) translated++;
       if (!def_en) missingDefEn++;
       if (!ctx_zh) missingContextZh++;
@@ -230,9 +236,12 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
       }
       words.push({
         lemma, pos: get('pos').trim(), cefr, rank, frequency,
-        translated: !!def_zh, definition_zh: def_zh,
-        definition_en: def_en, context_sentence: ctx_sent,
-        context_sentence_zh: ctx_zh, sourceFile,
+        translated: !!def_zh,
+        definition_zh: def_zh, definition_zh_source: def_zh_src,
+        definition_en: def_en, definition_en_source: def_en_src,
+        context_sentence: ctx_sent,
+        context_sentence_zh: ctx_zh, context_sentence_zh_source: ctx_zh_src,
+        sourceFile,
       });
     }
   }

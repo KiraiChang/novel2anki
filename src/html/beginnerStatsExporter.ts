@@ -28,6 +28,33 @@ function sentCell(s: string): string {
   return s ? `<span class="sent">${esc(s)}</span>` : '<span class="empty">—</span>';
 }
 
+const MISSING_CSV_HEADERS = [
+  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency',
+  'definition_en', 'definition_en_source',
+  'context_sentence', 'context_sentence_zh', 'context_sentence_zh_source',
+  'definition_zh', 'definition_zh_source',
+  'source_file',
+];
+
+function escCsv(v: string): string {
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
+function wordStatToCsvRow(w: WordStat): string {
+  return [
+    w.lemma, w.pos, w.cefr, String(w.rank), String(w.frequency),
+    w.definition_en, w.definition_en_source,
+    w.context_sentence, w.context_sentence_zh, w.context_sentence_zh_source,
+    w.definition_zh, w.definition_zh_source,
+    w.sourceFile,
+  ].map(escCsv).join(',');
+}
+
+function exportMissingCsv(words: WordStat[], outputPath: string): void {
+  const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...words.map(wordStatToCsvRow)];
+  fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+}
+
 function buildMissingDefZhRows(words: WordStat[]): string {
   return words
     .filter(w => !w.definition_zh)
@@ -54,14 +81,27 @@ function buildMissingContextZhRows(words: WordStat[]): string {
     </tr>`).join('\n');
 }
 
+function buildMissingDefEnRows(words: WordStat[]): string {
+  return words
+    .filter(w => !w.definition_en)
+    .map(w => `<tr>
+      <td class="num">${w.rank}</td>
+      <td class="word">${esc(w.lemma)}</td>
+      <td><span class="pos">${esc(w.pos)}</span></td>
+      <td>${badgeCell(w.cefr)}</td>
+      <td class="sent-cell">${sentCell(w.context_sentence)}</td>
+      <td>${fileChip(w.sourceFile)}</td>
+    </tr>`).join('\n');
+}
+
 function missingSection(opts: {
   title: string; subtitle: string; count: number;
-  emptyMsg: string; tableId: string; tbodyId: string;
+  emptyMsg: string; anchorId: string; tableId: string; tbodyId: string;
   searchId: string; cefrId: string; cntId: string;
   cefrOptions: string; colHeaders: string; rows: string;
 }): string {
-  const { title, subtitle, count, emptyMsg, tableId, tbodyId, searchId, cefrId, cntId, cefrOptions, colHeaders, rows } = opts;
-  return `<div class="section">
+  const { title, subtitle, count, emptyMsg, anchorId, tableId, tbodyId, searchId, cefrId, cntId, cefrOptions, colHeaders, rows } = opts;
+  return `<div class="section" id="${anchorId}">
     <h2>${title} <span style="font-weight:400;color:#94a3b8;font-size:13px">（${count.toLocaleString()} 筆）</span></h2>
     <p class="section-sub">${subtitle}</p>
     ${count === 0
@@ -81,11 +121,18 @@ function missingSection(opts: {
   </div>`;
 }
 
+export interface BeginnerStatsExportResult {
+  htmlPath: string;
+  missingDefZhPath: string;
+  missingCtxZhPath: string;
+  missingDefEnPath: string;
+}
+
 export function exportBeginnerStatsToHtml(
   stats: BeginnerWordStats,
   deckName: string,
   outputDir: string,
-): string {
+): BeginnerStatsExportResult {
   const translatedPct  = stats.total > 0 ? Math.round(stats.translated / stats.total * 100) : 0;
   const missingDefZh   = stats.total - stats.translated;
   const missingDefEnPct  = stats.total > 0 ? Math.round(stats.missingDefEn    / stats.total * 100) : 0;
@@ -119,10 +166,11 @@ export function exportBeginnerStatsToHtml(
   }).join('\n');
 
   const defZhMissingSection = missingSection({
-    title: '未翻譯單字',
+    title: '未翻譯單字（中文）',
     subtitle: '以下單字尚無中文翻譯，請至對應 CSV 填入 definition_zh 欄。',
     count: missingDefZh,
     emptyMsg: '所有單字均已翻譯',
+    anchorId: 'sec-defzh',
     tableId: 'tbl-defzh', tbodyId: 'body-defzh',
     searchId: 'q-defzh', cefrId: 'cefr-defzh', cntId: 'cnt-defzh',
     cefrOptions,
@@ -137,10 +185,11 @@ export function exportBeginnerStatsToHtml(
   });
 
   const ctxZhMissingSection = missingSection({
-    title: '未翻譯例句',
+    title: '未翻譯例句（中文）',
     subtitle: '以下單字的英文例句尚無中文翻譯，請至對應 CSV 填入 context_sentence_zh 欄。',
     count: stats.missingContextZh,
     emptyMsg: '所有例句均已翻譯',
+    anchorId: 'sec-ctxzh',
     tableId: 'tbl-ctxzh', tbodyId: 'body-ctxzh',
     searchId: 'q-ctxzh', cefrId: 'cefr-ctxzh', cntId: 'cnt-ctxzh',
     cefrOptions,
@@ -152,6 +201,25 @@ export function exportBeginnerStatsToHtml(
       <th data-col="cefr">CEFR</th>
       <th data-col="file">來源檔案</th>`,
     rows: buildMissingContextZhRows(stats.words),
+  });
+
+  const defEnMissingSection = missingSection({
+    title: '未翻譯英文解釋',
+    subtitle: '以下單字尚無英文定義，請至對應 CSV 填入 definition_en 欄，或執行 --mw 自動預查。',
+    count: stats.missingDefEn,
+    emptyMsg: '所有單字均已有英文定義',
+    anchorId: 'sec-defen',
+    tableId: 'tbl-defen', tbodyId: 'body-defen',
+    searchId: 'q-defen', cefrId: 'cefr-defen', cntId: 'cnt-defen',
+    cefrOptions,
+    colHeaders: `
+      <th data-col="rank" class="sorted-asc">排名</th>
+      <th data-col="word">單字</th>
+      <th data-col="pos">詞性</th>
+      <th data-col="cefr">CEFR</th>
+      <th data-col="sent" style="cursor:default">英文例句</th>
+      <th data-col="file">來源檔案</th>`,
+    rows: buildMissingDefEnRows(stats.words),
   });
 
   const html = `<!DOCTYPE html>
@@ -208,13 +276,33 @@ tr:hover td{background:#f8fafc}
 .file-chip{display:inline-block;font-size:11px;color:#6366f1;background:#eef2ff;padding:2px 8px;border-radius:4px;white-space:nowrap}
 .missing-zero{text-align:center;padding:32px;color:#94a3b8;font-size:13px}
 .hidden{display:none}
+.nav-bar{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 32px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.nav-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;border:1px solid #e2e8f0;background:#f8fafc;color:#334155;cursor:pointer;transition:background .15s,border-color .15s}
+.nav-btn:hover{background:#eef2ff;border-color:#6366f1;color:#6366f1}
+.nav-btn .cnt{font-size:11px;background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:10px;line-height:1.4}
+.nav-btn.warn .cnt{background:#fff3e0;color:#f97316}
+#back-top{position:fixed;bottom:28px;right:28px;z-index:200;width:44px;height:44px;border-radius:50%;background:#1e293b;color:#f1f5f9;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.2);opacity:0;transition:opacity .2s}
+#back-top.visible{opacity:1}
+#back-top:hover{background:#334155}
 </style>
 </head>
 <body>
-<header>
+<header id="top">
   <h1>${esc(deckName)}</h1>
   <p>初學者字彙統計報告</p>
 </header>
+<nav class="nav-bar">
+  <a class="nav-btn${missingDefZh > 0 ? ' warn' : ''}" href="#sec-defzh">
+    未翻譯單字（中文）<span class="cnt">${missingDefZh.toLocaleString()}</span>
+  </a>
+  <a class="nav-btn${stats.missingContextZh > 0 ? ' warn' : ''}" href="#sec-ctxzh">
+    未翻譯例句（中文）<span class="cnt">${stats.missingContextZh.toLocaleString()}</span>
+  </a>
+  <a class="nav-btn${stats.missingDefEn > 0 ? ' warn' : ''}" href="#sec-defen">
+    未翻譯英文解釋<span class="cnt">${stats.missingDefEn.toLocaleString()}</span>
+  </a>
+</nav>
+<button id="back-top" title="回到頂端" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
 <div class="container">
 
   <div class="summary">
@@ -253,6 +341,8 @@ tr:hover td{background:#f8fafc}
   ${defZhMissingSection}
 
   ${ctxZhMissingSection}
+
+  ${defEnMissingSection}
 
   <div class="section">
     <h2>完整詞彙列表</h2>
@@ -354,6 +444,16 @@ tr:hover td{background:#f8fafc}
   initTable('body-ctxzh', {rank:0,word:1,defzh:2,sent:3,cefr:4,file:5},
             'q-ctxzh', 'cefr-ctxzh', 'cnt-ctxzh');
 
+  // 未翻譯英文解釋：rank=0, word=1, pos=2, cefr=3, sent=4, file=5
+  initTable('body-defen', {rank:0,word:1,pos:2,cefr:3,sent:4,file:5},
+            'q-defen', 'cefr-defen', 'cnt-defen');
+
+  // ── 回到頂端按鈕：捲動超過 300px 才顯示 ───────────────────────────
+  var backTop = document.getElementById('back-top');
+  window.addEventListener('scroll', function() {
+    backTop.classList.toggle('visible', window.scrollY > 300);
+  });
+
   // ── 完整詞彙列表 ────────────────────────────────────────────────────
   var rows2   = Array.from(document.querySelectorAll('#tbody tr'));
   var search2 = document.getElementById('search');
@@ -413,9 +513,17 @@ tr:hover td{background:#f8fafc}
 </html>`;
 
   const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
-  const filename = `${slug}-beginner-stats.html`;
-  const outputPath = path.join(outputDir, filename);
   fs.mkdirSync(outputDir, { recursive: true });
-  fs.writeFileSync(outputPath, html, 'utf-8');
-  return outputPath;
+
+  const htmlPath        = path.join(outputDir, `${slug}-beginner-stats.html`);
+  const missingDefZhPath = path.join(outputDir, `${slug}-missing-def-zh.csv`);
+  const missingCtxZhPath = path.join(outputDir, `${slug}-missing-ctx-zh.csv`);
+  const missingDefEnPath = path.join(outputDir, `${slug}-missing-def-en.csv`);
+
+  fs.writeFileSync(htmlPath, html, 'utf-8');
+  exportMissingCsv(stats.words.filter(w => !w.definition_zh),      missingDefZhPath);
+  exportMissingCsv(stats.words.filter(w => !w.context_sentence_zh), missingCtxZhPath);
+  exportMissingCsv(stats.words.filter(w => !w.definition_en),       missingDefEnPath);
+
+  return { htmlPath, missingDefZhPath, missingCtxZhPath, missingDefEnPath };
 }
