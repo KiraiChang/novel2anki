@@ -28,7 +28,7 @@
 
 - [ ] **初學者模式 Cloze 字卡生成**（`src/csv/beginnerImporter.ts`、`src/index.ts`）：`importBeginnerWords` 目前只產生 `VocabCard[]`，`csvCards.cloze` 永遠為空。實作方式：以正規表示式在 `context_sentence` 中找 lemma（含前綴匹配涵蓋變化形），替換為 `{{c1::原形::definition_zh}}`，同時產出對應 `ClozeCard`；找不到時 fallback 為句尾附加 `[{{c1::lemma}}]`。可加 `--beginner-cloze` 旗標控制是否產生。
 
-- [ ] **Token 正規化設定檔（方言/古語變體還原）**（`src/nlp/`）：初學者模式 NLP 管線目前無法識別方言或古語變體（如 `yer` → `your`、`ye` → `you`、`'tis` → `it is`、`mayhaps` → `perhaps`），這些詞在 CEFR 字庫找不到對應，被標為 UNKNOWN 並送 MW 查詢（通常查無結果）。實作方式：支援 domain/book 層的 `*-normalize.json`（`{ "yer": "your", "ye": "you" }` 格式），在 tokenize 前套用替換；設定檔在 `--beginner` 掃描與 `--translate` 翻譯時均需讀入。
+- [x] **Token 正規化設定檔（方言/古語變體還原）**（`src/nlp/tokenNormalizer.ts`、`src/data/archaic-en.json`、`src/nlp/globalFreqAnalyzer.ts`、`src/csv/beginnerExporter.ts`、`src/csv/beginnerTranslator.ts`、`src/index.ts`，2026-06-11）：初學者模式 NLP 管線支援方言/古語變體正規化（如 `yer` → `your`、`'tis` → `it is`）。`buildGlobalFreqMap` 在 `tokenize` 前套用正規化，CEFR lookup 使用正規化後 lemma；`occurrence.sentence` 保留原文。`--translate` Phase 2 亦對例句套用正規化改善翻譯品質。`archaic-en.json`（~70 條）放 `WORD_CACHE_PATH`（fallback `src/data/`）；`{slug}-normalize.json` 放 output 目錄，與 CSV 同層。`--beginner` 掃描後自動比對 UNKNOWN 詞彙寫入 normalize 檔，CLI 輸出高頻 UNKNOWN 建議清單供人工判斷。
 
 - [ ] **NAME_SKIP 抽離為使用者設定檔**（`src/nlp/nameProtector.ts`）：現行 `NAME_SKIP` 硬編碼於程式碼，新增頭銜或通稱需修改原始碼。應支援 `*-name-skip.txt`（或 domain/book 層的共用設定，一行一詞）讓使用者擴充過濾清單；程式端保留核心代名詞作為不可覆蓋的底層集合，使用者設定只做合併（union）不做替換。
 

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { TranslatorConfig, batchTranslate } from '../cards/translator';
 import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
 import { getWordCache, DefinitionLayerCache } from '../nlp/wordCache';
+import { applyNormalization } from '../nlp/tokenNormalizer';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -382,7 +383,7 @@ export async function translateBeginnerWordsCsv(
     phase: 'dict' | 'translate' | 'write',
     meta?: { source?: DictSource; word?: string },
   ) => void,
-  options?: { force?: boolean; prebuiltNames?: Map<string, string> },
+  options?: { force?: boolean; prebuiltNames?: Map<string, string>; normalizeMap?: Map<string, string> },
 ): Promise<TranslateResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -448,12 +449,18 @@ export async function translateBeginnerWordsCsv(
   // 在翻譯 def_i 時能參考 sent_i 的語境，選出正確詞義。
   const sentences = needTranslation.map(({ cols }) => get(cols, 'context_sentence'));
 
+  // 正規化：在 NER 保護前先還原古語/方言詞（context_sentence 欄保留原文不變）
+  const normalizeMap = options?.normalizeMap;
+  const sentencesForTranslation = normalizeMap
+    ? sentences.map(s => applyNormalization(s, normalizeMap))
+    : sentences;
+
   // NER 人名保護：優先使用預建人名表（--beginner 階段產生），否則從本批句子動態偵測
   const namesMap = options?.prebuiltNames;
   const properNouns = namesMap
     ? new Set(namesMap.keys())
-    : buildProperNounSet(sentences);
-  const nameMaps = sentences.map(s => protectNames(s, properNouns));
+    : buildProperNounSet(sentencesForTranslation);
+  const nameMaps = sentencesForTranslation.map(s => protectNames(s, properNouns));
   const protectedSentences = nameMaps.map(m => m.text);
 
   const allTexts = englishDefs.flatMap((def, i) => [def, protectedSentences[i]]);

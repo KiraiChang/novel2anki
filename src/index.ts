@@ -22,7 +22,8 @@ import { exportToCsv, exportToCsvSplits, ChunkResult, scoreMention } from './csv
 import { importFromCsv, importFromCsvFiles, resolveCsvPaths } from './csv/importer';
 import { extractBeginnerVocab } from './nlp/beginnerExtractor';
 import { formatCoverageReport } from './nlp/coverageReport';
-import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile } from './csv/beginnerExporter';
+import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWordsSplit, exportBeginnerNamesFile, exportBeginnerNormalizeFile, loadBeginnerNormalizeMap } from './csv/beginnerExporter';
+import { findNormalizeFile, loadNormalizeFile, slugFromCsvPath } from './nlp/tokenNormalizer';
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, FillDefZhConfig } from './csv/beginnerTranslator';
@@ -448,6 +449,16 @@ program
             console.log(chalk.gray(`  使用預建人名表（${prebuiltNamesForBatch.size} 個名詞）：${namesFilesInDir[0]}`));
           }
 
+          // 嘗試讀取正規化設定（與 CSV 同目錄的 *-normalize.json）
+          const csvSlug = slugFromCsvPath(beginnerWordsCsvs[0]);
+          const normalizeFilePath = findNormalizeFile(csvDir, csvSlug ?? undefined);
+          const normalizeMapForBatch = normalizeFilePath
+            ? (() => { const m = loadNormalizeFile(normalizeFilePath); return m.size > 0 ? m : undefined; })()
+            : undefined;
+          if (normalizeMapForBatch) {
+            console.log(chalk.gray(`  使用正規化設定（${normalizeMapForBatch.size} 條規則）：${path.basename(normalizeFilePath!)}`));
+          }
+
           for (const csvPath of beginnerWordsCsvs) {
             process.stdout.write(chalk.yellow(`正在翻譯 ${path.basename(csvPath)}...\n`));
             const result = await translateBeginnerWordsCsv(csvPath, translateCfg, (cur, total, phase, meta) => {
@@ -458,7 +469,7 @@ program
                 const label = phase === 'translate' ? `${providerLabel} 翻譯` : '寫入';
                 process.stdout.write(chalk.yellow(`\r  ${label}... ${cur}/${total}   `));
               }
-            }, { force, prebuiltNames: prebuiltNamesForBatch });
+            }, { force, prebuiltNames: prebuiltNamesForBatch, normalizeMap: normalizeMapForBatch });
             process.stdout.write(`\r${chalk.green(`  ✓ 完成：翻譯 ${result.translatedCount} 個，跳過 ${result.skippedCount} 個`)}\n`);
           }
 
@@ -632,11 +643,18 @@ program
       const targetCoverage = parseFloat(options.beginnerTarget ?? '95') / 100;
       const minFreq = parseInt(options.beginnerMinFreq ?? '2', 10);
 
+      // 載入既有 normalize 設定（若已有 {slug}-normalize.json 則啟用正規化）
+      const normalizeMap = loadBeginnerNormalizeMap(options.output, deckName);
+      if (normalizeMap) {
+        console.log(chalk.gray(`  正規化設定：載入 ${normalizeMap.size} 條替換規則`));
+      }
+
       process.stdout.write(chalk.yellow('\n正在分析全書詞彙覆蓋率（初學者模式）... 段落 0/' + chunks.length));
       const result = extractBeginnerVocab(chunks, deckName, {
         targetCoverage,
         minFreq,
         includeA1: options.beginnerIncludeA1 ?? false,
+        normalizeMap,
         onProgress: (current, total) => {
           process.stdout.write(chalk.yellow(`\r正在分析全書詞彙覆蓋率（初學者模式）... 段落 ${current}/${total}`));
         },
@@ -667,6 +685,25 @@ program
       const namesFilePath = exportBeginnerNamesFile(cutoffTokens, deckName, options.output);
       console.log(chalk.green(`✓ 人名表：      ${namesFilePath}`));
       console.log(chalk.gray(`  （可在翻譯前確認或修改，翻譯時自動讀取以保護人名）`));
+
+      // 匯出 / 更新正規化設定（比對 UNKNOWN 詞彙與內建古語表）
+      const normalizeResult = exportBeginnerNormalizeFile(cutoffTokens, deckName, options.output);
+      if (normalizeResult.matched.length > 0) {
+        console.log(chalk.green(`✓ 正規化設定：  ${normalizeResult.outputPath}`));
+        console.log(chalk.gray(`  偵測到古語/方言詞（已加入正規化設定）：`));
+        for (const { from, to, count } of normalizeResult.matched) {
+          console.log(chalk.gray(`    ${from.padEnd(12)} → ${to.padEnd(12)} (出現 ${count} 次)`));
+        }
+      } else {
+        console.log(chalk.green(`✓ 正規化設定：  ${normalizeResult.outputPath}`));
+        console.log(chalk.gray(`  未偵測到內建古語詞（可手動新增替換規則）`));
+      }
+      if (normalizeResult.suggestions.length > 0) {
+        console.log(chalk.yellow(`  高頻 UNKNOWN 詞（未在內建古語表中，請確認是否為方言或奇幻原創詞）：`));
+        for (const { lemma, count } of normalizeResult.suggestions.slice(0, 10)) {
+          console.log(chalk.yellow(`    ${lemma.padEnd(16)} (出現 ${count} 次)`));
+        }
+      }
 
       // MW 預查（可單獨或搭配 --deepl）
       if (options.mw) {

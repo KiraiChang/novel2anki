@@ -4,6 +4,7 @@ import { cleanText } from './textCleaner';
 import { tokenize } from './tokenizer';
 import { lemmatize } from './lemmatizer';
 import { lookupCefrLevel } from './cefrLookup';
+import { applyNormalization } from './tokenNormalizer';
 
 function extractSentences(text: string): string[] {
   return text.split(/(?<=[.!?])\s+|\n+/)
@@ -16,10 +17,20 @@ export interface GlobalFreqResult {
   totalTokens: number;
 }
 
+export interface GlobalFreqOptions {
+  normalizeMap?: Map<string, string>;
+  onProgress?: (current: number, total: number) => void;
+}
+
 export function buildGlobalFreqMap(
   chunks: Chunk[],
-  onProgress?: (current: number, total: number) => void
+  optionsOrProgress?: GlobalFreqOptions | ((current: number, total: number) => void),
 ): GlobalFreqResult {
+  const options: GlobalFreqOptions =
+    typeof optionsOrProgress === 'function'
+      ? { onProgress: optionsOrProgress }
+      : (optionsOrProgress ?? {});
+  const { normalizeMap, onProgress } = options;
   const freqMap: GlobalFreqMap = new Map();
   let totalTokens = 0;
 
@@ -32,7 +43,11 @@ export function buildGlobalFreqMap(
 
     for (let sentIdx = 0; sentIdx < sentences.length; sentIdx++) {
       const sentence = sentences[sentIdx];
-      const rawTokens = tokenize(sentence);
+      // 保留原文供 occurrence.sentence；正規化句僅用於 tokenize/lemmatize/CEFR lookup
+      const sentenceForTokenize = normalizeMap
+        ? applyNormalization(sentence, normalizeMap)
+        : sentence;
+      const rawTokens = tokenize(sentenceForTokenize);
       const tokens = lemmatize(rawTokens);
 
       for (let tokIdx = 0; tokIdx < tokens.length; tokIdx++) {

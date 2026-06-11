@@ -220,7 +220,8 @@ beginnerExporter.ts
 | 覆蓋率排序 | `src/nlp/coverageRanker.ts` | 按頻率排序，計算累積覆蓋率（含基準線） |
 | 例句評分 | `src/nlp/sentenceScorer.ts` | Sentence Mining 評分：為每個詞選出「離開原書後仍能獨立理解且能推測詞義」的例句；對話句（引號 / em dash）`-5`、代詞開頭（He/She/They…）`-2`、說話動詞 `-1`、純敘述 `+2`、長度 40–120 `+5` |
 | 覆蓋率報告 | `src/nlp/coverageReport.ts` | 產生並格式化覆蓋率統計報告（終端輸出） |
-| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（9 欄，含 `definition_en` 預查欄）+ 分割版 words CSV + `*-beginner-names.txt`（人名表） |
+| 詞彙匯出 | `src/csv/beginnerExporter.ts` | `WordToken[]` → tokens CSV（12 欄）+ words CSV（9 欄，含 `definition_en` 預查欄）+ 分割版 words CSV + `*-beginner-names.txt`（人名表）+ `*-normalize.json`（古語正規化對照表）。`exportBeginnerNormalizeFile(tokens, deckName, outputDir)`：收集 UNKNOWN 詞彙，對照 `archaic-en.json` 自動補入命中條目，寫出 `{slug}-normalize.json` 至 output 目錄。`loadBeginnerNormalizeMap(outputDir, deckName)`：讀取 `{slug}-normalize.json`，回傳 `Map<string, string>` 供 `--beginner` 掃描前套用 |
+| Token 正規化 | `src/nlp/tokenNormalizer.ts` | 方言 / 古語變體正規化。`loadNormalizeFile(filePath)`：載入 JSON 對照表為 `Map<string, string>`。`loadArchaicMap()`：透過 `resolveDataPath('archaic-en.json')` 讀取內建古語表。`findNormalizeFile(dir, slug?)`：在目錄中尋找 `*-normalize.json`，slug 已知時優先精確比對。`slugFromCsvPath(csvPath)`：從 `*-beginner-words-*.csv` 檔名提取 slug。`applyNormalization(text, map)`：以非字母邊界 regex（`(?<![a-zA-Z])…(?![a-zA-Z])`）case-insensitive 替換，可處理 `'tis` 等含標點前綴的形式。`exportNormalizeFile(unknownWords, archaicMap, outputPath)`：保留既有條目（不覆蓋人工修改），補入新命中，回傳 `NormalizeFileResult { outputPath, matched, suggestions }` |
 | 詞彙匯入 | `src/csv/beginnerImporter.ts` | 偵測 CSV 格式（words/tokens）、支援多檔合併 → VocabCard[]；`definition_zh` 為空的列仍合併（不過濾）；`computeBeginnerWordStats()` → `BeginnerWordStats`（含 per-word `WordStat[]`） |
 | 字彙統計 HTML | `src/html/beginnerStatsExporter.ts` | `BeginnerWordStats` → 自含式 HTML 報告（摘要卡 + CEFR 長條圖 + 可排序/搜尋/篩選詞彙表），匯出為 `*-beginner-stats.html` |
 | NER 人名保護 | `src/nlp/nameProtector.ts` | `buildProperNounSet()`（compromise + mid-sentence 大寫；`NAME_SKIP` 小寫儲存，涵蓋代名詞、宗教/軍事/封建頭銜）、`protectNames()` / `restoreNames(translated, restoreMap, translationMap?)`（`__PERSON_N__` 佔位符；有 translationMap 時優先替換為中文音譯，否則還原英文原名）、`saveNamesFile()`（保留現有 mapping，只補新名詞）/ `loadNamesFile()`（回傳 `Map<string, string>`，支援 `English: 中文` 或純英文格式） |
@@ -316,6 +317,8 @@ interface BeginnerWordStats {
 | 檔案 | 來源 | 說明 |
 |------|------|------|
 | `cefr-wordlist.json` | `scripts/build-cefr.js` 產生 | 5,732 個單字的 CEFR 等級對照（A1–C2），由 `resolveDataPath` 解析路徑 |
+| `archaic-en.json` | 手動維護 | ~70 條中古英語 / 方言 → 現代英語對照（`ye→you`、`yer→your`、`'tis→it is` 等）。查找順序：`WORD_CACHE_PATH/archaic-en.json` → `src/data/archaic-en.json`（由 `resolveDataPath` 解析）。使用者可在 `WORD_CACHE_PATH` 放自訂版本擴充條目 |
+| `{slug}-normalize.json` | `--beginner` 自動產生 | 書籍專屬的 Token 正規化對照表；`--beginner` 掃描後從 UNKNOWN 詞彙比對 `archaic-en.json` 自動生成，使用者可手動補充非古語詞彙。儲存於 output 目錄（與 CSV 同層），下次 `--beginner` 掃描前自動載入並套用 |
 | `phrase-list.json` | `scripts/extract-phrase-lists.py` 產生 | 1,409 個學術/常見片語，整合 OPAL Spoken（~250）、OPAL Written（~370）、Oxford Phrase List（750，A1–C1）三份 PDF；結構：`{ opal_spoken?, opal_written?, opl_level? }` |
 | `phrase-cache.json` | `--prefetch-phrases` 自動建立 | MW Learner's API 片語查詢快取；key = 正規化片語字串，value = `{ def, source }`；命中（`source: 'MW'`）與查無結果（`source: 'no-def'`，`def: ''`）均寫入，避免重複查詢。儲存於 `WORD_CACHE_PATH`（與 word-dict / word-cache 同目錄） |
 

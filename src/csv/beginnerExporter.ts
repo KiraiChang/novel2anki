@@ -2,6 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WordToken } from '../nlp/types';
 import { buildProperNounSet, saveNamesFile } from '../nlp/nameProtector';
+import { exportNormalizeFile, loadArchaicMap, loadNormalizeFile, findNormalizeFile, NormalizeFileResult } from '../nlp/tokenNormalizer';
+
+export { NormalizeFileResult };
 
 const HEADERS = [
   'token_id', 'lemma', 'original', 'pos', 'cefr_level', 'global_frequency',
@@ -125,6 +128,45 @@ export function exportBeginnerNamesFile(
   fs.mkdirSync(outputDir, { recursive: true });
   saveNamesFile(names, outputPath);
   return outputPath;
+}
+
+/**
+ * 依據本次掃描的 UNKNOWN tokens，比對內建古語表，產生/更新 {slug}-normalize.json。
+ * 回傳命中清單（已寫入）與高頻未命中建議清單（供 CLI 輸出讓使用者判斷）。
+ */
+export function exportBeginnerNormalizeFile(
+  tokens: WordToken[],
+  deckName: string,
+  outputDir: string,
+): NormalizeFileResult {
+  const unknownWords = new Map<string, number>();
+  for (const token of tokens) {
+    if (token.cefrLevel === 'UNKNOWN') {
+      unknownWords.set(token.lemma, token.globalFrequency);
+    }
+  }
+
+  const archaicMap = loadArchaicMap();
+  const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
+  const outputPath = path.join(outputDir, `${slug}-normalize.json`);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  return exportNormalizeFile(unknownWords, archaicMap, outputPath);
+}
+
+/**
+ * 讀取 output 目錄下的 {slug}-normalize.json（若存在）。
+ * 供 --beginner 掃描前載入，正規化生效。
+ */
+export function loadBeginnerNormalizeMap(
+  outputDir: string,
+  deckName: string,
+): Map<string, string> | undefined {
+  const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
+  const filePath = findNormalizeFile(outputDir, slug);
+  if (!filePath) return undefined;
+  const map = loadNormalizeFile(filePath);
+  return map.size > 0 ? map : undefined;
 }
 
 export function exportBeginnerTokensToCsv(

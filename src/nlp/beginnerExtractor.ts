@@ -8,6 +8,7 @@ import { generateCoverageReport, CoverageReport } from './coverageReport';
 
 export interface BeginnerExtractOptions extends FilterOptions {
   targetCoverage?: number;
+  normalizeMap?: Map<string, string>;
   onProgress?: (current: number, total: number) => void;
 }
 
@@ -23,9 +24,9 @@ export function extractBeginnerVocab(
   bookTitle: string,
   options: BeginnerExtractOptions = {}
 ): BeginnerExtractResult {
-  const { targetCoverage = 0.95, onProgress, ...filterOptions } = options;
+  const { targetCoverage = 0.95, normalizeMap, onProgress, ...filterOptions } = options;
 
-  const { freqMap, totalTokens } = buildGlobalFreqMap(chunks, onProgress);
+  const { freqMap, totalTokens } = buildGlobalFreqMap(chunks, { normalizeMap, onProgress });
   const filterResult = applyBeginnerFilters(freqMap, filterOptions);
 
   // Baseline coverage: tokens from words a beginner already knows (stopwords + A1 words)
