@@ -19,7 +19,7 @@ type SentenceCacheData = Record<string, SentenceCacheEntry>;
 
 // 例句 source 優先序（空/舊條目 = 0 < cache = 1 < API 翻譯 = 2 < 人工 csv = 3）
 const SENTENCE_SOURCE_PRIORITY: Record<string, number> = {
-  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'csv': 3,
+  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'chatgpt': 2, 'csv': 3,
 };
 
 // phrase-cache.json：MW 片語定義快取（命中與 no-def 均存，避免重複查詢）
@@ -98,6 +98,16 @@ export class WordCacheManager {
   setDict(word: string, pos: string | null | undefined, def: string): void {
     this.dict[this.key(word, pos)] = def;
     this.dictDirty = true;
+  }
+
+  /** 查找英文定義來源（dict → 'dict'；cache → 儲存的 source 字串，統一小寫） */
+  getEnSource(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    if (this.dict[exact] || this.dict[base]) return 'dict';
+    const src = this.cache[exact]?.source ?? this.cache[base]?.source ?? null;
+    if (!src) return null;
+    return src.toLowerCase() === 'mw' ? 'mw' : src.toLowerCase();
   }
 
   /** 查找中文翻譯快取：精確 word:pos → fallback word，回傳 zh 字串 */
@@ -399,6 +409,13 @@ export class DefinitionLayerCache {
     const exact = this.key(word, pos);
     const base  = this.key(word);
     return this.enData[exact]?.def ?? this.enData[base]?.def ?? null;
+  }
+
+  /** 查找英文定義來源（快取中儲存的原始 source，如 'mw'/'free'） */
+  getEnSource(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.enData[exact]?.source ?? this.enData[base]?.source ?? null;
   }
 
   /** 若 key 尚無英文定義則寫入，回傳是否實際寫入 */

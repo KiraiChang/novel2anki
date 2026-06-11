@@ -15,7 +15,7 @@ const DEEPL_BATCH_SIZE = 50;
 // 越高優先序越不應被低品質來源覆蓋
 // cache(1) < deepl/azure/google/claude(2) < csv(3)
 const SOURCE_PRIORITY: Record<string, number> = {
-  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'csv': 3,
+  '': 0, 'cache': 1, 'deepl': 2, 'google': 2, 'azure': 2, 'claude': 2, 'chatgpt': 2, 'csv': 3,
 };
 
 // 回傳 true 表示可以用 cache 覆蓋（空 or cache 來源）
@@ -278,7 +278,19 @@ export async function fetchBeginnerWordsMW(
     for (const row of rows) row.splice(insertAt, 0, '');
   }
 
-  const defEnColIdx = idx['definition_en'];
+  // 若 CSV 沒有 definition_en_source 欄，插入於 definition_en 之後
+  if (idx['definition_en_source'] === undefined) {
+    const insertAt = idx['definition_en'] + 1;
+    headers.splice(insertAt, 0, 'definition_en_source');
+    for (const key of Object.keys(idx)) {
+      if (idx[key] >= insertAt) idx[key]++;
+    }
+    idx['definition_en_source'] = insertAt;
+    for (const row of rows) row.splice(insertAt, 0, '');
+  }
+
+  const defEnColIdx    = idx['definition_en'];
+  const defEnSrcColIdx = idx['definition_en_source'];
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
   const needFetch = rows
@@ -292,8 +304,10 @@ export async function fetchBeginnerWordsMW(
     const lemma = get(cols, 'lemma');
     const pos   = get(cols, 'pos');
     const { def, source } = await fetchEnglishDefinition(lemma, pos);
-    while (rows[i].length <= defEnColIdx) rows[i].push('');
-    rows[i][defEnColIdx] = def;
+    const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
+    while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+    rows[i][defEnColIdx]    = def;
+    rows[i][defEnSrcColIdx] = srcStr;
     onProgress?.(j + 1, needFetch.length, { source, word: lemma });
   }
 
@@ -710,6 +724,7 @@ export function syncDefinitionCacheWithCsv(
   const defZhColIdx    = idx['definition_zh'];
   const defZhSrcColIdx = idx['definition_zh_source'];
   const defEnColIdx    = idx['definition_en'];
+  const defEnSrcColIdx = idx['definition_en_source'];
   if (defZhColIdx === undefined) {
     return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
@@ -728,7 +743,8 @@ export function syncDefinitionCacheWithCsv(
     const lemma     = get(rows[i], 'lemma').trim();
     const pos       = get(rows[i], 'pos').trim() || null;
     const defZh     = get(rows[i], 'definition_zh').trim();
-    const defEn     = defEnColIdx !== undefined ? get(rows[i], 'definition_en').trim() : '';
+    const defEn     = defEnColIdx    !== undefined ? get(rows[i], 'definition_en').trim()        : '';
+    const defEnSrc  = defEnSrcColIdx !== undefined ? get(rows[i], 'definition_en_source').trim() : '';
     const cefrLevel  = get(rows[i], 'cefr_level').trim();
     const defZhSrc   = defZhSrcColIdx !== undefined ? get(rows[i], 'definition_zh_source').trim() : '';
 
@@ -745,12 +761,13 @@ export function syncDefinitionCacheWithCsv(
 
     // ── zh：CSV → cache ──────────────────────────────────────────────────────
     if (defZh) {
+      const zhSource = defZhSrc || 'csv';
       if (!cefrKnown) {
-        if (bookCache)   wroteAny = bookCache.setIfEmpty(lemma, pos, defZh)   || wroteAny;
-        if (domainCache) wroteAny = domainCache.setIfEmpty(lemma, pos, defZh) || wroteAny;
+        if (bookCache)   wroteAny = bookCache.setIfEmpty(lemma, pos, defZh, zhSource)   || wroteAny;
+        if (domainCache) wroteAny = domainCache.setIfEmpty(lemma, pos, defZh, zhSource) || wroteAny;
       }
       if (cefrKnown && !wc.getChinese(lemma, pos)) {
-        wc.setChinese(lemma, pos, defZh, 'csv');
+        wc.setChinese(lemma, pos, defZh, zhSource);
         wroteAny = true;
       }
     } else {
@@ -786,24 +803,37 @@ export function syncDefinitionCacheWithCsv(
 
     // ── en：CSV → cache ──────────────────────────────────────────────────────
     if (defEn && defEnColIdx !== undefined) {
+      const enSource = defEnSrc || 'csv';
       if (!cefrKnown) {
-        if (bookCache)   wroteAny = bookCache.setEnIfEmpty(lemma, pos, defEn)   || wroteAny;
-        if (domainCache) wroteAny = domainCache.setEnIfEmpty(lemma, pos, defEn) || wroteAny;
+        if (bookCache)   wroteAny = bookCache.setEnIfEmpty(lemma, pos, defEn, enSource)   || wroteAny;
+        if (domainCache) wroteAny = domainCache.setEnIfEmpty(lemma, pos, defEn, enSource) || wroteAny;
       }
       if (cefrKnown && !wc.get(lemma, pos)) {
-        wc.setCache(lemma, pos, defEn, 'csv');
+        wc.setCache(lemma, pos, defEn, enSource);
         wroteAny = true;
       }
     } else if (defEnColIdx !== undefined) {
       // ── en：cache → CSV ────────────────────────────────────────────────────
       let cachedEn: string | null = null;
-      if (bookCache)   cachedEn ??= bookCache.getEn(lemma, pos);
-      if (domainCache) cachedEn ??= domainCache.getEn(lemma, pos);
-      cachedEn ??= wc.get(lemma, pos)?.def ?? null;
+      let cachedEnSrc: string | null = null;
+      if (bookCache) {
+        cachedEn    = bookCache.getEn(lemma, pos);
+        if (cachedEn) cachedEnSrc = bookCache.getEnSource(lemma, pos);
+      }
+      if (!cachedEn && domainCache) {
+        cachedEn    = domainCache.getEn(lemma, pos);
+        if (cachedEn) cachedEnSrc = domainCache.getEnSource(lemma, pos);
+      }
+      if (!cachedEn) {
+        cachedEn    = wc.get(lemma, pos)?.def ?? null;
+        if (cachedEn) cachedEnSrc = wc.getEnSource(lemma, pos);
+      }
 
       if (cachedEn) {
-        while (rows[i].length <= defEnColIdx) rows[i].push('');
+        const maxIdx = Math.max(defEnColIdx, defEnSrcColIdx ?? 0);
+        while (rows[i].length <= maxIdx) rows[i].push('');
         rows[i][defEnColIdx] = cachedEn;
+        if (defEnSrcColIdx !== undefined) rows[i][defEnSrcColIdx] = cachedEnSrc || 'cache';
         filledAny = true;
         csvDirty  = true;
       }

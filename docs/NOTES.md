@@ -27,7 +27,19 @@
 
 - **NER 人名保護：預建人名表流程**（`src/nlp/nameProtector.ts`、`src/csv/beginnerExporter.ts`）：DeepL 會把常見英文詞當人名使用的角色名音譯或誤譯（如 "Pony" → "小馬"）。解決方式：翻譯前將例句中的專有名詞換成 `__PERSON_N__` 佔位符，翻譯後再還原。**新流程（預建人名表）**：`--beginner` 掃描結束後，從所有 `bestSentence` 收集專有名詞，輸出到 `{slug}-beginner-names.txt`（純文字，一行一名詞，含說明注釋），使用者可在翻譯前手動確認、新增或刪除。`--translate` 翻譯時自動讀取同目錄的 `*-beginner-names.txt`，以預建名詞集取代即時偵測（`translateBeginnerWordsCsv` 的 `prebuiltNames` 選項）。偵測策略：① compromise `.people()` + `#ProperNoun`；② mid-sentence 大寫詞（token 索引 > 0）。限制：若某人名在整書 bestSentence 中都只出現在句首且 compromise 未識別，則不出現在自動偵測結果中，使用者需手動加入人名檔。NER 相關函式（`buildProperNounSet`、`protectNames`、`restoreNames`、`saveNamesFile`、`loadNamesFile`）集中於 `nameProtector.ts`，供 exporter 與 translator 共用。
 
-- **翻譯來源欄位 `definition_zh_source` / `context_sentence_zh_source`**（`src/csv/beginnerTranslator.ts`、`src/csv/beginnerExporter.ts`，2026-06-11）：CSV 新增兩個 source 欄記錄翻譯來源，採優先序設計（空 = 0 < `cache` = 1 < `deepl`/`azure`/`google`/`claude` = 2 < `csv` = 3）。`--translate` 翻譯後寫入 `config.provider`；`--fill-sent-zh` / `--fill-def-zh` cache→CSV 方向只在優先序 ≤ 1（空或 `cache`）時填入，**寫入快取條目中儲存的原始來源**（`getSentenceZhSource` / `getChineseSource` / `DefinitionLayerCache.getSource`），來源 null 時退回 `'cache'`；避免 cache 覆蓋已有 API 翻譯或人工校正，且 source 欄能正確反映翻譯品質（如 `'deepl'` 而非 `'cache'`）。舊 CSV（無 source 欄）翻譯時自動插入（`context_sentence_zh_source` 插在 `context_sentence_zh` 後；`definition_zh_source` 插在 `definition_zh` 後），sync 函式無 source 欄時跳過優先序檢查保持向後相容。`csv` source 為保留值，使用者可手動填入以保護人工校正不被任何自動填入覆蓋。
+- **翻譯來源欄位 `definition_zh_source` / `context_sentence_zh_source` / `definition_en_source`**（`src/csv/beginnerTranslator.ts`、`src/csv/beginnerExporter.ts`，2026-06-11）：CSV 三個 source 欄各自記錄對應欄位的來源，採相同優先序設計（空 = 0 < `cache` = 1 < `deepl`/`azure`/`google`/`claude`/`chatgpt` = 2 < `csv` = 3）。
+
+  **`definition_zh_source` / `context_sentence_zh_source`**：`--translate` 翻譯後寫入 `config.provider`；`--fill-sent-zh` / `--fill-def-zh` cache→CSV 方向只在優先序 ≤ 1（空或 `cache`）時填入，**寫入快取條目中儲存的原始來源**（`getSentenceZhSource` / `getChineseSource` / `DefinitionLayerCache.getSource`），來源 null 時退回 `'cache'`。舊 CSV 自動插入（`context_sentence_zh_source` 插在 `context_sentence_zh` 後；`definition_zh_source` 插在 `definition_zh` 後），sync 函式無 source 欄時跳過優先序檢查保持向後相容。
+
+  **`definition_en_source`**：`--mw` 執行 `fetchBeginnerWordsMW` 後寫入正規化來源字串（`'mw'` / `'free'` / `'fallback'` / `'cache'` / `'dict'`；API 回傳 `'MW'` → `'mw'`；`'cached'` → `'cache'`；其餘小寫直寫）；舊 CSV 無此欄時自動插入（插在 `definition_en` 後）。`--fill-def-zh` 雙向同步時：CSV→cache 方向讀取 `defEnSrc` 欄並原樣傳入 `setEnIfEmpty`（避免來源被升格）；cache→CSV 方向以 `getEnSource()` 取得各層真實來源寫入此欄，來源 null 時退回 `'cache'`。
+
+  共通：`csv` source 為保留值，使用者可手動填入以保護人工校正不被任何自動填入覆蓋；避免 cache 覆蓋已有 API 翻譯，且 source 欄能正確反映來源品質。
+
+- **新增翻譯來源時需調整的位置**（2026-06-11）：source 字串不在優先序 map 時 fallback 為 0（等同空白），導致該翻譯可被 `cache` 覆蓋。新增任何翻譯後端或手動來源標籤時，必須同步更新以下兩處，否則 sync 保護失效：
+  1. `src/csv/beginnerTranslator.ts` → `SOURCE_PRIORITY`（`canFillFromCache` 所用）
+  2. `src/nlp/wordCache.ts` → `SENTENCE_SOURCE_PRIORITY`（`setSentenceZh` 所用）
+  - 一般翻譯 API（非人工校正）設為 `2`，與 deepl/azure/google/claude/chatgpt 同級。
+  - HTML / Anki 匯出不讀 source 欄，無需調整。
 
 - **人名檔支援中文音譯 mapping，同時將宗教/軍事頭銜加入 NAME_SKIP**（`src/nlp/nameProtector.ts`，2026-06-10）：角色名如 "Markwart" 可透過名詞檔的 `Markwart: 馬克瓦特` 格式指定音譯，`restoreNames` 第三參數 `translationMap?: Map<string, string>` 接收 `loadNamesFile` 的回傳值，有中文值則替換為中文，無中文值則保留英文原名。`loadNamesFile` 同時支援舊格式（一行一名詞）與新格式（`英文: 中文`），回傳 `Map<string, string>`；`saveNamesFile` 合併現有條目與新偵測到的名詞（保留現有 mapping，只補新名詞），避免人工音譯被覆蓋。宗教（Father / Abbot / Brother / Sister / Friar…）、封建（Sir / King / Queen / Duke…）、軍事（Captain / General / Colonel…）等頭銜統一加入 NAME_SKIP，翻譯後端可直接翻譯「神父 院長 馬克瓦特」而非保留英文 "Father Abbot Markwart"。`prebuiltNames` 型別由 `Set<string>` 改為 `Map<string, string>` 後，`properNouns` 從 `new Set(namesMap.keys())` 取得，保護集與音譯映射共用同一個 Map 物件。
 

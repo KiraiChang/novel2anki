@@ -17,6 +17,7 @@ const mockGetChinese       = jest.fn<string | null, [string, string | null]>();
 const mockGetChineseSource = jest.fn<string | null, [string, string | null]>();
 const mockGet              = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
 const mockSetCache         = jest.fn<void, [string, string | null, string, string]>();
+const mockGetEnSource      = jest.fn<string | null, [string, string | null]>();
 const mockFlush            = jest.fn<void, []>();
 
 let mockCacheDir: string;
@@ -27,6 +28,7 @@ let mockCacheDir: string;
   getChineseSource: mockGetChineseSource,
   get:              mockGet,
   setCache:         mockSetCache,
+  getEnSource:      mockGetEnSource,
   flush:            mockFlush,
   get cacheDir() { return mockCacheDir; },
 }));
@@ -113,6 +115,7 @@ beforeEach(() => {
   mockGetChinese.mockReturnValue(null);
   mockGetChineseSource.mockReturnValue(null); // null → fallback to 'cache'
   mockGet.mockReturnValue(null);
+  mockGetEnSource.mockReturnValue(null);
   // re-apply implementation after clearAllMocks
   (getWordCache as jest.Mock).mockImplementation(() => ({
     setChinese:       mockSetChinese,
@@ -120,6 +123,7 @@ beforeEach(() => {
     getChineseSource: mockGetChineseSource,
     get:              mockGet,
     setCache:         mockSetCache,
+    getEnSource:      mockGetEnSource,
     flush:            mockFlush,
     get cacheDir() { return mockCacheDir; },
   }));
@@ -519,7 +523,7 @@ describe('syncDefinitionCacheWithCsv — CSV → en cache (write definition_en t
     expect(fs.existsSync(enFile)).toBe(true);
     const data = JSON.parse(fs.readFileSync(enFile, 'utf-8')) as Record<string, {def: string; source: string}>;
     expect(data['dactyl:noun'].def).toBe('a winged lizard');
-    expect(data['dactyl:noun'].source).toBe('mw');
+    expect(data['dactyl:noun'].source).toBe('csv'); // 無 definition_en_source 欄 → fallback 'csv'
   });
 
   it('should write CEFR-known word definition_en to global cache (setCache)', () => {
@@ -658,5 +662,73 @@ describe('syncDefinitionCacheWithCsv — source priority protection', () => {
     // Then: source 攔截 + en cache 已有 → 計入 noMatch，不計入 skippedCache
     expect(result.noMatch).toBe(1);
     expect(result.skippedCache).toBe(0);
+  });
+});
+
+// ── source 保留（CSV → cache 時帶入正確 source） ────────────────────────────────
+
+describe('syncDefinitionCacheWithCsv — source preservation on CSV → cache write-back', () => {
+  it('should store actual source "deepl" in domain cache (not hardcoded "csv")', () => {
+    // Given: definition_zh_source = 'deepl'
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defZh: '翼龍魔', defZhSrc: 'deepl' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+    // Then: domain cache records 'deepl', not 'csv'
+    const cacheFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, { zh: string; source: string }>;
+    expect(data['dactyl:noun'].source).toBe('deepl');
+  });
+
+  it('should store actual source "azure" in book cache (not hardcoded "csv")', () => {
+    // Given: definition_zh_source = 'azure'
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defZh: '翼龍魔', defZhSrc: 'azure' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath, undefined, { book: 'the-demon-awakens' });
+    // Then
+    const cacheFile = path.join(tmpDir, 'book_the-demon-awakens_cache_zh.json');
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, { zh: string; source: string }>;
+    expect(data['dactyl:noun'].source).toBe('azure');
+  });
+
+  it('should default source to "csv" when definition_zh_source column is empty', () => {
+    // Given: source column exists but is empty → manual edit assumed
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defZh: '翼龍魔', defZhSrc: '' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy' });
+    // Then: empty source → defaults to 'csv' (human-edit assumption)
+    const cacheFile = path.join(tmpDir, 'domain_fantasy_cache_zh.json');
+    const data = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as Record<string, { zh: string; source: string }>;
+    expect(data['dactyl:noun'].source).toBe('csv');
+  });
+
+  it('should pass actual source to global setChinese for CEFR-known word', () => {
+    // Given: CEFR-known word with source='azure'
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'sword', pos: 'Noun', cefrLevel: 'C1', defZh: '劍', defZhSrc: 'azure' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then: setChinese called with 'azure', not 'csv'
+    expect(mockSetChinese).toHaveBeenCalledWith('sword', 'Noun', '劍', 'azure');
+  });
+
+  it('should store "deepl" in both domain and book cache when both specified', () => {
+    // Given
+    const csvPath = writeCsvWithSrc(tmpDir, 'test.csv', [
+      makeRowWithSrc({ lemma: 'dactyl', pos: 'Noun', cefrLevel: 'UNKNOWN', defZh: '翼龍魔', defZhSrc: 'deepl' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath, undefined, { domain: 'fantasy', book: 'the-demon-awakens' });
+    // Then: both caches record 'deepl'
+    const bookData   = JSON.parse(fs.readFileSync(path.join(tmpDir, 'book_the-demon-awakens_cache_zh.json'), 'utf-8')) as Record<string, { zh: string; source: string }>;
+    const domainData = JSON.parse(fs.readFileSync(path.join(tmpDir, 'domain_fantasy_cache_zh.json'), 'utf-8'))         as Record<string, { zh: string; source: string }>;
+    expect(bookData['dactyl:noun'].source).toBe('deepl');
+    expect(domainData['dactyl:noun'].source).toBe('deepl');
   });
 });
