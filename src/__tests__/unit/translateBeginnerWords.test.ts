@@ -16,6 +16,7 @@ const mockWc = {
   get: jest.fn(),
   setCache: jest.fn(),
   setSentenceZh: jest.fn(),
+  setWordZhIfEmpty: jest.fn().mockReturnValue(true),
   flush: jest.fn(),
 };
 

@@ -106,7 +106,10 @@
 
 - **`translateBeginnerWordsCsv` Phase 3：`definition_zh` 由「每列覆寫」改為「空白才寫入」**（`src/csv/beginnerTranslator.ts`，2026-06-10）：原始設計對 `definition_zh` 無條件覆寫，但 `needTranslation` 現在也包含「definition_zh 已有但 context_sentence_zh 空白」的列，若仍無條件覆寫會將人工校正的定義抹掉。改為與 `context_sentence_zh` 相同的邏輯：已有值則跳過，force 模式才強制覆寫。
 
-- **`needTranslation` 過濾條件擴充，修復 context_sentence_zh 永遠空白問題**（`src/csv/beginnerTranslator.ts`，2026-06-10）：原本過濾條件只看 `definition_zh` 是否空白，導致「definition_zh 已填、context_sentence_zh 空白」的列被跳過，例句翻譯永遠為空（除非 `--translate-force`）。改為 OR 條件：任一欄空白即納入翻譯。
+- **`needTranslation` 過濾條件擴充，四欄任一空白即納入，四者皆有才跳過**（`src/csv/beginnerTranslator.ts`，2026-06-10 / 2026-06-11 / 2026-06-12）：
+  - 2026-06-10：原本只看 `definition_zh` 是否空白 → 改為 `definition_zh OR context_sentence_zh` 任一空白（修復例句翻譯永遠為空的問題）。
+  - 2026-06-11：再擴充加入 `definition_en`：三欄任一空白納入。Phase 3 同步新增 `definition_en` 回寫邏輯：Phase 1 本次從 API 取得的定義寫入 `definition_en` 欄（原本已有值的列不覆寫；不受 `--translate-force` 控制），來源字串正規化後存入 `definition_en_source`（`'MW'`→`'mw'`、`'cached'`→`'cache'`）。`estimateBeginnerTranslate` 的統計條件同步更新，使費用預估涵蓋僅缺 `definition_en` 的列。
+  - 2026-06-12：再擴充加入 `word_zh`：四欄（`definition_en`、`definition_zh`、`context_sentence_zh`、`word_zh`）任一空白納入。Phase 2.5 對缺少 `word_zh` 的列另批翻譯 lemma（不影響 Phase 2 的交錯批次），結果填入 `word_zh` 欄並以 `setWordZhIfEmpty` 存入 `word-cache-zh.json`（已有值不覆蓋）。
 
 - **`sentence-cache.json` 加入 `source` 欄位，`setSentenceZh` 採優先序保護**（`src/nlp/wordCache.ts`，2026-06-11）：`SentenceCacheEntry` 新增必填 `source: string`，與 CSV source 欄採相同優先序（`''`=0 < `cache`=1 < API=2 < `csv`=3）。`setSentenceZh(en, zh, source)` 回傳 `boolean`：現有條目 source 非 `''` 且新來源優先序 ≤ 現有時跳過（回傳 `false`）；現有 `''` 時無條件覆蓋（舊條目或未知來源）；同優先序（如 deepl vs deepl）跳過，保留較早的版本。`syncSentenceCacheWithCsv` 改為依回傳值計 `savedToCache` / `skippedCache`，移除舊的 `getSentenceZh` 預查。舊 `sentence-cache.json` 無 `source` 欄時由 `loadSentenceCache()` 補 `''`，已遷移的快取檔手動補 `"source": "deepl"`。
 
@@ -115,5 +118,7 @@
 - **Token 正規化採非字母邊界 regex，支援含標點前綴的古語形式**（`src/nlp/tokenNormalizer.ts`，2026-06-11）：`applyNormalization` 使用 `(?<![a-zA-Z])…(?![a-zA-Z])` 而非 `\b`，原因是 `\b` 在 `'tis` 前的 `'` 會把 `'` 視為非字母邊界，`\b` 落在 `'` 與 `t` 之間，理論上也能比對；但實測 `'Tis` 中 `\b` 的行為因引擎而異，改用非字母環視（negative lookbehind / lookahead）可確保「前後字元均為非 a-z/A-Z 時才比對」，對 `'tis` 也正確作用，且不誤觸 `layer` / `player` 中的 `yer`（前一字元為字母，lookbehind 阻擋）。替換值保持小寫，tokenize 後統一處理大小寫，不影響 lemma 識別。
 
 - **`{slug}-normalize.json` 保留人工修改，只補新命中條目**（`src/nlp/tokenNormalizer.ts`、`src/csv/beginnerExporter.ts`，2026-06-11）：`exportNormalizeFile` 先讀取現有 JSON（若存在），對 UNKNOWN 詞彙中命中 `archaic-en.json` 的詞，若 key 不在現有設定中才寫入（`!existing.has(canonical)`）。好處：使用者手動加入的條目（非 archaic 表收錄的方言、發明詞）或手動修改的值均不被覆蓋；新出現的古語詞自動補入。最終輸出依 key 排序，易於人工 diff 比對。`archaic-en.json` 與 `{slug}-normalize.json` 的關係：前者是靜態參考表（與書無關），後者是書本專屬的活設定（人工可擴充）。
+
+- **`word_zh` 欄位設計：以 bare lemma 翻譯取得直接中文對應詞，與定義翻譯分離**（`src/csv/beginnerTranslator.ts`、`src/nlp/wordCache.ts`，2026-06-12）：`word_zh`（如「橋樑」）與 `definition_zh`（如「一種橫跨河流的建築」）並存，前者為直接對應詞、後者為說明性定義。Phase 2.5 直接送 lemma（如 `bridge`）給翻譯後端，不附加 POS，因為翻譯後端對單一詞彙的上下文感知已足夠（實測 `bridge` → `橋樑`、`run` → `奔跑`）。此批次獨立於 Phase 2 的「定義 + 例句交錯批次」，避免干擾定義翻譯的語境。`word_zh` 快取只存全局（`word-cache-zh.json`）、不分 domain/book，因為詞彙的直接中文對應是語言通用知識，不隨書籍/領域變化。舊 CSV 執行 `--translate` 時自動插入 `word_zh`、`word_zh_source` 欄（向後相容）。
 
 - **`SEMANTIC_PREPOSITIONS` 白名單允許有語意的介系詞進入初學者字卡**（`src/nlp/beginnerFilter.ts`，2026-06-10）：`CONTENT_POS` 原本排除所有 `Preposition`，導致 `against`（靠著）、`beneath`（在…下面）等帶有明確方位語意的介系詞一律被過濾。直接加入 `Preposition` 到 `CONTENT_POS` 過於粗糙（會放入 `per`、`via`（功能性）等不值得學習的介系詞）；stopWords 已涵蓋 `about`/`around`/`through`/`within`/`despite`/`upon` 等高頻虛詞，stopWords 裡的介系詞走 `not-stopword` 路徑，不受白名單影響。白名單僅需涵蓋「不在 stopWords 但有語意」的介系詞（目前 17 個：against、amid、amidst、beneath、beyond、beside、besides、except、unlike、via、across、along、among、amongst、opposite、underneath、versus）。POS 誤標（compromise 有時把 `against` 誤標為 `Adjective`）不影響白名單邏輯，誤標的詞走 `CONTENT_POS.has('Adjective')` 通過；只有正確標為 `Preposition` 時才走白名單例外。

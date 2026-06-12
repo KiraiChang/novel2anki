@@ -319,7 +319,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 
 > **字典來源**：翻譯前會先從字典 API 取得英文定義再送 DeepL。有設定 `MW_API_KEY` 時使用 Merriam-Webster（品質較佳），否則使用 Free Dictionary API（dictionaryapi.dev）作為 fallback。
 >
-> `--translate` 會自動跳過已有 `definition_zh` 的列，重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--translate-force`：
+> `--translate` 會自動跳過 `definition_en`、`definition_zh`、`context_sentence_zh`、`word_zh` **四欄皆已填入**的列；四者只要有任一空白，就會補齊那個欄位（其餘已填的欄位不覆寫）。重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--translate-force`：
 >
 > ```bash
 > # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
@@ -334,11 +334,11 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | 檔案 | 欄位數 | 用途 |
 |------|:---:|------|
 | `*-beginner-tokens.csv` | 12 | 完整元資料存檔、追蹤回原文位置（含 token_id、ai_hint） |
-| `*-beginner-words.csv` | 9 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
-| `*-beginner-words-part-NN.csv` | 9 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
+| `*-beginner-words.csv` | 14 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
+| `*-beginner-words-part-NN.csv` | 14 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
 | `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--translate` 自動讀取。支援兩種格式：`Elbryan`（保留英文原名）或 `Markwart: 馬克瓦特`（指定中文音譯） |
 
-**words CSV 欄位**（9 欄）：
+**words CSV 欄位**（14 欄）：
 
 | 欄位 | 說明 |
 |------|------|
@@ -347,10 +347,15 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `cefr_level` | CEFR 等級（A2–C2 / UNKNOWN） |
 | `coverage_rank` | 學習優先順序（1 = 最高頻，最先學） |
 | `global_frequency` | 全書出現次數 |
-| `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
-| `context_sentence_zh` | 例句中文翻譯（留空，可選填，字卡背面輔助理解） |
 | `definition_en` | 英文定義（`--mw` 自動填入；可手動編輯作書級客製化；`--update-dict` 升級至全域字典） |
-| `definition_zh` | 繁體中文定義（留空，待翻譯） |
+| `definition_en_source` | `definition_en` 來源（`mw` / `free` / `fallback` / `cache` / `dict`） |
+| `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
+| `context_sentence_zh` | 例句中文翻譯（`--translate` 自動填入，字卡背面輔助理解） |
+| `context_sentence_zh_source` | `context_sentence_zh` 來源（`deepl` / `azure` / `google` / `claude` / `cache`） |
+| `definition_zh` | 繁體中文定義（`--translate` 自動填入，字卡背面主要內容） |
+| `definition_zh_source` | `definition_zh` 來源（`deepl` / `azure` / `google` / `claude` / `cache` / `csv`） |
+| `word_zh` | 單字直接中文對應詞（`--translate` 自動填入，如「橋樑」；非說明性定義） |
+| `word_zh_source` | `word_zh` 來源（`deepl` / `azure` / `google` / `claude` / `cache`） |
 
 ### 覆蓋率報告範例
 
@@ -468,9 +473,10 @@ npx ts-node src/index.ts output/ --fill-sent-zh
 
 ## 詞彙定義快取（`--fill-def-zh`）
 
-`--translate` 翻譯後，每筆 `definition_zh` 與 `definition_en` 可同時雙向同步至快取：
+`--translate` 翻譯後，每筆 `definition_zh`、`definition_en`、`word_zh` 可同時雙向同步至快取：
 - **zh**：同步 `definition_zh` ↔ `word-cache-zh.json`（全局）/ `*_cache_zh.json`（分層）
 - **en**：同步 `definition_en` ↔ `word-cache.json`（全局）/ `*_cache.json`（分層）
+- **word_zh**：同步 `word_zh` ↔ `word-cache-zh.json`（全局，無分層；CEFR 已知才寫入）
 
 讓未來其他書的同一詞彙直接讀快取而不需重翻，也能從已有 MW 定義的 `word-cache.json` 填回 `definition_en`。
 
@@ -524,10 +530,10 @@ book_the-demon-awakens_cache.json     ← 英文定義（CEFR UNKNOWN 詞，本�
 ### 輸出統計
 
 三類統計（與 `--fill-sent-zh` 格式相同）：
-- **存入快取**：`definition_zh` 或 `definition_en`（或兩者）成功寫入任一層快取的列數
+- **存入快取**：`definition_zh`、`definition_en`、`word_zh` 任一成功寫入任一層快取的列數
 - **略過（已有）**：欄位不為空、但全部目標層快取皆已有此詞條目的列數
-- **補填 CSV**：`definition_zh` 或 `definition_en`（或兩者）原本空白、任一層快取命中並填入的列數
-- **略過（無快取）**：lemma 為空，或兩欄均空白且各層快取均找不到的列數
+- **補填 CSV**：`definition_zh`、`definition_en`、`word_zh` 任一原本空白、任一層快取命中並填入的列數
+- **略過（無快取）**：lemma 為空，或各欄均空白且各層快取均找不到的列數
 
 ## 匯入 Anki
 

@@ -10,7 +10,13 @@ interface CacheEntry { def: string; source: string; }
 type CacheData = Record<string, CacheEntry>;
 
 // word-cache-zh.json：中文翻譯快取，可拋棄重建
-export interface CacheZhEntry { zh: string; source: string; example?: string; }
+export interface CacheZhEntry {
+  zh: string;
+  source: string;
+  example?: string;
+  word_zh?: string;        // 單字直接中文對應（e.g. bridge → 橋樑）
+  word_zh_source?: string; // 填入來源（deepl / azure / ...）
+}
 type CacheZhData = Record<string, CacheZhEntry>;
 
 // sentence-cache.json：例句中文翻譯快取，key = FNV-1a 雜湊（8 字元 hex）
@@ -178,6 +184,35 @@ export class WordCacheManager {
   setChinese(word: string, pos: string | null | undefined, zh: string, source: string): void {
     this.cacheZh[this.key(word, pos)] = { zh, source };
     this.cacheZhDirty = true;
+  }
+
+  /** 查找 word_zh（單字直接中文）：精確 word:pos → fallback word */
+  getWordZh(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.cacheZh[exact]?.word_zh ?? this.cacheZh[base]?.word_zh ?? null;
+  }
+
+  /** 查找 word_zh 的來源 */
+  getWordZhSource(word: string, pos?: string | null): string | null {
+    const exact = this.key(word, pos);
+    const base  = this.key(word);
+    return this.cacheZh[exact]?.word_zh_source ?? this.cacheZh[base]?.word_zh_source ?? null;
+  }
+
+  /** word_zh 尚無值才寫入，回傳是否實際寫入 */
+  setWordZhIfEmpty(word: string, pos: string | null | undefined, zh: string, source: string): boolean {
+    const k = this.key(word, pos);
+    const entry = this.cacheZh[k];
+    if (entry?.word_zh) return false;
+    if (entry) {
+      entry.word_zh = zh;
+      entry.word_zh_source = source;
+    } else {
+      this.cacheZh[k] = { zh: '', source: '', word_zh: zh, word_zh_source: source };
+    }
+    this.cacheZhDirty = true;
+    return true;
   }
 
   /** 枚舉一個詞在 word-cache / word-dict 中所有 POS 條目（含無 POS 預設） */

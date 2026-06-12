@@ -348,7 +348,7 @@ export function estimateBeginnerTranslate(
     for (let i = 1; i < lines.length; i++) {
       const cols = parseRow(lines[i]);
       const get = (col: string) => cols[idx[col]] ?? '';
-      if (options?.force || !get('definition_zh').trim()) {
+      if (options?.force || !get('definition_en').trim() || !get('definition_zh').trim() || !get('context_sentence_zh').trim() || !get('word_zh').trim()) {
         untranslatedCount++;
         sentenceChars += get('context_sentence').length;
       }
@@ -410,10 +410,12 @@ export async function translateBeginnerWordsCsv(
   // 解析所有資料列
   const rows = lines.slice(1).map(l => parseRow(l));
 
-  // 自動插入 source 欄（舊 CSV 無此欄時向後相容）
+  // 自動插入缺少的欄（舊 CSV 向後相容）
   for (const [srcCol, afterCol] of [
     ['context_sentence_zh_source', 'context_sentence_zh'],
     ['definition_zh_source',       'definition_zh'       ],
+    ['word_zh',                    'definition_zh_source'],
+    ['word_zh_source',             'word_zh'             ],
   ] as [string, string][]) {
     if (idx[srcCol] === undefined) {
       const insertAt = (idx[afterCol] ?? headers.length - 1) + 1;
@@ -426,14 +428,16 @@ export async function translateBeginnerWordsCsv(
     }
   }
 
-  // 找出需要翻譯的列索引（force 模式對全部列重新翻譯）
-  // 條件：definition_zh 或 context_sentence_zh 任一為空，均需翻譯
+  // 找出需要處理的列索引（force 模式對全部列重新翻譯）
+  // 條件：definition_en、definition_zh、context_sentence_zh、word_zh 任一為空，均需處理；四者皆有才跳過
   const needTranslation = rows
     .map((cols, i) => ({ i, cols }))
     .filter(({ cols }) =>
       options?.force ||
+      !get(cols, 'definition_en').trim() ||
       !get(cols, 'definition_zh').trim() ||
-      !get(cols, 'context_sentence_zh').trim(),
+      !get(cols, 'context_sentence_zh').trim() ||
+      !get(cols, 'word_zh').trim(),
     );
 
   const skippedCount = rows.length - needTranslation.length;
@@ -445,15 +449,29 @@ export async function translateBeginnerWordsCsv(
   const lemmas = needTranslation.map(({ cols }) => get(cols, 'lemma'));
   const posList = needTranslation.map(({ cols }) => get(cols, 'pos'));
   const englishDefs: string[] = [];
+  const englishDefSources: string[] = [];  // '' = 已在 CSV 不需回寫；否則為 API 來源
   for (let i = 0; i < lemmas.length; i++) {
     const cached = get(needTranslation[i].cols, 'definition_en');
     if (cached?.trim()) {
       englishDefs.push(cached.trim());
+      englishDefSources.push('');
       onProgress?.(i + 1, lemmas.length, 'dict', { source: 'cached', word: lemmas[i] });
     } else {
       const { def, source } = await fetchEnglishDefinition(lemmas[i], posList[i]);
       englishDefs.push(def);
+      englishDefSources.push(source);
       onProgress?.(i + 1, lemmas.length, 'dict', { source, word: lemmas[i] });
+    }
+  }
+
+  // Phase 2.5 準備：蒐集 word_zh 尚空的列（在 Phase 2 前準備，讓 batchTranslate 可並行）
+  const wordZhColIdx    = (idx as Record<string, number>)['word_zh'];
+  const wordZhSrcColIdx = (idx as Record<string, number>)['word_zh_source'];
+  const wordZhBatch: Array<{ j: number; lemma: string }> = [];
+  for (let j = 0; j < needTranslation.length; j++) {
+    const { cols } = needTranslation[j];
+    if (options?.force || !get(cols, 'word_zh').trim()) {
+      wordZhBatch.push({ j, lemma: lemmas[j] });
     }
   }
 
@@ -489,6 +507,11 @@ export async function translateBeginnerWordsCsv(
     );
   }
 
+  // Phase 2.5：翻譯 lemma 取得 word_zh（單字直接中文對應）
+  const wordZhTranslated: string[] = wordZhBatch.length > 0
+    ? await batchTranslateChunked(wordZhBatch.map(b => b.lemma), config)
+    : [];
+
   // 偶數索引 = 定義，奇數索引 = 例句（翻譯後還原人名佔位符）
   const defZh = allTranslated.filter((_, i) => i % 2 === 0);
   const sentZh = allTranslated
@@ -497,6 +520,8 @@ export async function translateBeginnerWordsCsv(
 
   // Phase 3：填回資料列
   onProgress?.(0, 1, 'write');
+  const defEnColIdx     = (idx as Record<string, number>)['definition_en'];
+  const defEnSrcColIdx  = (idx as Record<string, number>)['definition_en_source'];
   const defZhColIdx     = (idx as Record<string, number>)['definition_zh'];
   const sentZhColIdx    = (idx as Record<string, number>)['context_sentence_zh'];
   const defZhSrcColIdx  = (idx as Record<string, number>)['definition_zh_source'];
@@ -505,11 +530,22 @@ export async function translateBeginnerWordsCsv(
 
   needTranslation.forEach(({ i }, j) => {
     const maxIdx = Math.max(
+      defEnColIdx ?? 0, defEnSrcColIdx ?? 0,
       defZhColIdx ?? 0, sentZhColIdx ?? 0,
       defZhSrcColIdx ?? 0, sentZhSrcColIdx ?? 0,
+      wordZhColIdx ?? 0, wordZhSrcColIdx ?? 0,
     );
     while (rows[i].length <= maxIdx) rows[i].push('');
 
+    if (defEnColIdx !== undefined) {
+      const src = englishDefSources[j];
+      if (src) {  // 非空 = 本次從 API 取得，需回寫（空字串 = 原本已在 CSV，不覆寫）
+        rows[i][defEnColIdx] = englishDefs[j];
+        if (defEnSrcColIdx !== undefined) {
+          rows[i][defEnSrcColIdx] = src === 'MW' ? 'mw' : src === 'cached' ? 'cache' : src;
+        }
+      }
+    }
     if (defZhColIdx !== undefined && (options?.force || !rows[i][defZhColIdx]?.trim())) {
       rows[i][defZhColIdx] = defZh[j] ?? '';
       if (defZhSrcColIdx !== undefined) rows[i][defZhSrcColIdx] = provider;
@@ -520,8 +556,21 @@ export async function translateBeginnerWordsCsv(
     }
   });
 
-  // 例句翻譯存入 sentence cache
+  // word_zh 寫回 CSV + 存入 cache（setWordZhIfEmpty：已有則略過）
   const wc = getWordCache();
+  for (let bIdx = 0; bIdx < wordZhBatch.length; bIdx++) {
+    const { j } = wordZhBatch[bIdx];
+    const { i, cols } = needTranslation[j];
+    const wordZh = wordZhTranslated[bIdx] ?? '';
+    if (!wordZh) continue;
+    if (wordZhColIdx !== undefined && (options?.force || !rows[i][wordZhColIdx]?.trim())) {
+      rows[i][wordZhColIdx] = wordZh;
+      if (wordZhSrcColIdx !== undefined) rows[i][wordZhSrcColIdx] = provider;
+    }
+    wc.setWordZhIfEmpty(get(cols, 'lemma'), get(cols, 'pos') || null, wordZh, provider);
+  }
+
+  // 例句翻譯存入 sentence cache
   needTranslation.forEach(({ }, j) => {
     const enSent = sentences[j];
     const zhSent = sentZh[j];
@@ -721,10 +770,12 @@ export function syncDefinitionCacheWithCsv(
   const rows = lines.slice(1).map(l => parseRow(l));
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
-  const defZhColIdx    = idx['definition_zh'];
-  const defZhSrcColIdx = idx['definition_zh_source'];
-  const defEnColIdx    = idx['definition_en'];
-  const defEnSrcColIdx = idx['definition_en_source'];
+  const defZhColIdx     = idx['definition_zh'];
+  const defZhSrcColIdx  = idx['definition_zh_source'];
+  const defEnColIdx     = idx['definition_en'];
+  const defEnSrcColIdx  = idx['definition_en_source'];
+  const wrdZhColIdx     = idx['word_zh'];
+  const wrdZhSrcColIdx  = idx['word_zh_source'];
   if (defZhColIdx === undefined) {
     return { savedToCache: 0, skippedCache: 0, filledFromCache: 0, noMatch: rows.length, outputPath: csvPath };
   }
@@ -839,6 +890,28 @@ export function syncDefinitionCacheWithCsv(
       }
     }
 
+    // ── word_zh：CSV → cache / cache → CSV（global only，無 domain/book 分層）──
+    const wordZhVal    = wrdZhColIdx    !== undefined ? get(rows[i], 'word_zh').trim()        : '';
+    const wordZhSrcVal = wrdZhSrcColIdx !== undefined ? get(rows[i], 'word_zh_source').trim() : '';
+    if (wordZhVal && wrdZhColIdx !== undefined) {
+      if (cefrKnown && !wc.getWordZh(lemma, pos)) {
+        wc.setWordZhIfEmpty(lemma, pos, wordZhVal, wordZhSrcVal || 'csv');
+        wroteAny = true;
+      }
+    } else if (wrdZhColIdx !== undefined && !wordZhVal) {
+      if (!(wrdZhSrcColIdx !== undefined && !canFillFromCache(wordZhSrcVal))) {
+        const cachedWordZh = wc.getWordZh(lemma, pos);
+        if (cachedWordZh) {
+          const maxIdx = Math.max(wrdZhColIdx, wrdZhSrcColIdx ?? 0);
+          while (rows[i].length <= maxIdx) rows[i].push('');
+          rows[i][wrdZhColIdx] = cachedWordZh;
+          if (wrdZhSrcColIdx !== undefined) rows[i][wrdZhSrcColIdx] = wc.getWordZhSource(lemma, pos) || 'cache';
+          filledAny = true;
+          csvDirty  = true;
+        }
+      }
+    }
+
     // ── counters ─────────────────────────────────────────────────────────────
     if (wroteAny) {
       savedToCache++;
@@ -846,8 +919,8 @@ export function syncDefinitionCacheWithCsv(
     } else if (filledAny) {
       filledFromCache++;
       onProgress?.(i + 1, rows.length, 'filled');
-    } else if ((defZh || defEn) && !zhBlocked) {
-      // zh/en 有值但快取已存在（setIfEmpty 略過）
+    } else if ((defZh || defEn || wordZhVal) && !zhBlocked) {
+      // zh/en/word_zh 有值但快取已存在（setIfEmpty 略過）
       skippedCache++;
       onProgress?.(i + 1, rows.length, 'skip');
     } else {

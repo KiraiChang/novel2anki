@@ -12,24 +12,30 @@ import { getWordCache } from '../../nlp/wordCache';
 
 // ── mock 設定 ─────────────────────────────────────────────────────────────────
 
-const mockSetChinese       = jest.fn<void, [string, string | null, string, string]>();
-const mockGetChinese       = jest.fn<string | null, [string, string | null]>();
-const mockGetChineseSource = jest.fn<string | null, [string, string | null]>();
-const mockGet              = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
-const mockSetCache         = jest.fn<void, [string, string | null, string, string]>();
-const mockGetEnSource      = jest.fn<string | null, [string, string | null]>();
-const mockFlush            = jest.fn<void, []>();
+const mockSetChinese        = jest.fn<void, [string, string | null, string, string]>();
+const mockGetChinese        = jest.fn<string | null, [string, string | null]>();
+const mockGetChineseSource  = jest.fn<string | null, [string, string | null]>();
+const mockGet               = jest.fn<{ def: string; tier: string } | null, [string, string | null]>();
+const mockSetCache          = jest.fn<void, [string, string | null, string, string]>();
+const mockGetEnSource       = jest.fn<string | null, [string, string | null]>();
+const mockFlush             = jest.fn<void, []>();
+const mockGetWordZh         = jest.fn<string | null, [string, (string | null)?]>();
+const mockGetWordZhSource   = jest.fn<string | null, [string, (string | null)?]>();
+const mockSetWordZhIfEmpty  = jest.fn<boolean, [string, string | null | undefined, string, string]>();
 
 let mockCacheDir: string;
 
 (getWordCache as jest.Mock).mockImplementation(() => ({
-  setChinese:       mockSetChinese,
-  getChinese:       mockGetChinese,
-  getChineseSource: mockGetChineseSource,
-  get:              mockGet,
-  setCache:         mockSetCache,
-  getEnSource:      mockGetEnSource,
-  flush:            mockFlush,
+  setChinese:        mockSetChinese,
+  getChinese:        mockGetChinese,
+  getChineseSource:  mockGetChineseSource,
+  get:               mockGet,
+  setCache:          mockSetCache,
+  getEnSource:       mockGetEnSource,
+  flush:             mockFlush,
+  getWordZh:         mockGetWordZh,
+  getWordZhSource:   mockGetWordZhSource,
+  setWordZhIfEmpty:  mockSetWordZhIfEmpty,
   get cacheDir() { return mockCacheDir; },
 }));
 
@@ -117,14 +123,20 @@ beforeEach(() => {
   mockGet.mockReturnValue(null);
   mockGetEnSource.mockReturnValue(null);
   // re-apply implementation after clearAllMocks
+  mockGetWordZh.mockReturnValue(null);
+  mockGetWordZhSource.mockReturnValue(null);
+  mockSetWordZhIfEmpty.mockReturnValue(true);
   (getWordCache as jest.Mock).mockImplementation(() => ({
-    setChinese:       mockSetChinese,
-    getChinese:       mockGetChinese,
-    getChineseSource: mockGetChineseSource,
-    get:              mockGet,
-    setCache:         mockSetCache,
-    getEnSource:      mockGetEnSource,
-    flush:            mockFlush,
+    setChinese:        mockSetChinese,
+    getChinese:        mockGetChinese,
+    getChineseSource:  mockGetChineseSource,
+    get:               mockGet,
+    setCache:          mockSetCache,
+    getEnSource:       mockGetEnSource,
+    flush:             mockFlush,
+    getWordZh:         mockGetWordZh,
+    getWordZhSource:   mockGetWordZhSource,
+    setWordZhIfEmpty:  mockSetWordZhIfEmpty,
     get cacheDir() { return mockCacheDir; },
   }));
 });
@@ -730,5 +742,151 @@ describe('syncDefinitionCacheWithCsv — source preservation on CSV → cache wr
     const domainData = JSON.parse(fs.readFileSync(path.join(tmpDir, 'domain_fantasy_cache_zh.json'), 'utf-8'))         as Record<string, { zh: string; source: string }>;
     expect(bookData['dactyl:noun'].source).toBe('deepl');
     expect(domainData['dactyl:noun'].source).toBe('deepl');
+  });
+});
+
+// ── word_zh 雙向同步 ──────────────────────────────────────────────────────────
+
+const HEADERS_WORD_ZH = '"lemma","pos","cefr_level","coverage_rank","global_frequency","definition_en","context_sentence","context_sentence_zh","definition_zh","word_zh","word_zh_source"';
+
+function makeRowWordZh(fields: {
+  lemma?: string; pos?: string; cefrLevel?: string;
+  defZh?: string; wordZh?: string; wordZhSrc?: string;
+}): string {
+  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  return [
+    fields.lemma     ?? 'word',
+    fields.pos       ?? 'Noun',
+    fields.cefrLevel ?? 'B1',
+    '1', '100',
+    '',  // definition_en
+    '',  // context_sentence
+    '',  // context_sentence_zh
+    fields.defZh   ?? '',
+    fields.wordZh  ?? '',
+    fields.wordZhSrc ?? '',
+  ].map(esc).join(',');
+}
+
+function writeCsvWordZh(dir: string, name: string, rows: string[]): string {
+  const csvPath = path.join(dir, name);
+  fs.writeFileSync(csvPath, [HEADERS_WORD_ZH, ...rows].join('\n'), 'utf-8');
+  return csvPath;
+}
+
+function readWordZh(csvPath: string): string[] {
+  const lines = fs.readFileSync(csvPath, 'utf-8').trim().split('\n');
+  const hdrs = lines[0].split(',').map(f => f.replace(/^"|"$/g, ''));
+  const idx = hdrs.indexOf('word_zh');
+  return lines.slice(1).map(l => l.split(',').map(f => f.replace(/^"|"$/g, ''))[idx] ?? '');
+}
+
+describe('syncDefinitionCacheWithCsv — word_zh CSV → cache', () => {
+  it('should call setWordZhIfEmpty for CEFR-known rows with non-empty word_zh', () => {
+    // Given
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '橋樑' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(mockSetWordZhIfEmpty).toHaveBeenCalledWith('bridge', 'Noun', '橋樑', 'csv');
+    expect(mockSetWordZhIfEmpty).toHaveBeenCalledTimes(1);
+  });
+
+  it('should NOT call setWordZhIfEmpty for CEFR UNKNOWN rows', () => {
+    // Given: fantasy word — should only write to domain/book, not global
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'powrie', pos: 'Noun', cefrLevel: 'UNKNOWN', wordZh: '妖精' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then: UNKNOWN CEFR → no global word_zh write
+    expect(mockSetWordZhIfEmpty).not.toHaveBeenCalled();
+  });
+
+  it('should NOT call setWordZhIfEmpty when cache already has word_zh (getWordZh returns non-null)', () => {
+    // Given: cache already has word_zh → setWordZhIfEmpty returns false (we mock getWordZh != null)
+    mockGetWordZh.mockReturnValue('橋');
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '橋樑' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then: getWordZh returned non-null, so setWordZhIfEmpty is NOT called
+    expect(mockSetWordZhIfEmpty).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncDefinitionCacheWithCsv — word_zh cache → CSV', () => {
+  it('should fill word_zh from cache when column is empty', () => {
+    // Given
+    mockGetWordZh.mockReturnValue('橋樑');
+    mockGetWordZhSource.mockReturnValue('deepl');
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.filledFromCache).toBe(1);
+    expect(readWordZh(csvPath)[0]).toBe('橋樑');
+  });
+
+  it('should write word_zh_source from getWordZhSource when filling from cache', () => {
+    // Given
+    mockGetWordZh.mockReturnValue('橋樑');
+    mockGetWordZhSource.mockReturnValue('azure');
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '' }),
+    ]);
+    // When
+    syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    const lines = fs.readFileSync(csvPath, 'utf-8').trim().split('\n');
+    const hdrs = lines[0].split(',').map(f => f.replace(/^"|"$/g, ''));
+    const srcIdx = hdrs.indexOf('word_zh_source');
+    const row = lines[1].split(',').map(f => f.replace(/^"|"$/g, ''));
+    expect(row[srcIdx]).toBe('azure');
+  });
+
+  it('should count as noMatch when word_zh cache misses', () => {
+    // Given: cache returns null for word_zh
+    mockGetWordZh.mockReturnValue(null);
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.noMatch).toBe(1);
+    expect(result.filledFromCache).toBe(0);
+  });
+
+  it('should NOT fill word_zh from cache when source priority blocks (e.g. deepl)', () => {
+    // Given: source='deepl' → higher priority than cache
+    mockGetWordZh.mockReturnValue('橋樑');
+    const csvPath = writeCsvWordZh(tmpDir, 'test.csv', [
+      makeRowWordZh({ lemma: 'bridge', pos: 'Noun', cefrLevel: 'B1', wordZh: '', wordZhSrc: 'deepl' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then
+    expect(result.filledFromCache).toBe(0);
+    expect(readWordZh(csvPath)[0]).toBe('');
+  });
+
+  it('should skip word_zh sync gracefully for old CSV without word_zh column', () => {
+    // Given: 舊格式 CSV，無 word_zh 欄
+    mockGetChinese.mockReturnValue('奔跑');
+    const csvPath = writeCsv(tmpDir, 'old.csv', [
+      makeRow({ lemma: 'run', pos: 'Verb', cefrLevel: 'B1', defZh: '' }),
+    ]);
+    // When
+    const result = syncDefinitionCacheWithCsv(csvPath);
+    // Then: 僅填 definition_zh，不呼叫 word_zh 相關方法
+    expect(result.filledFromCache).toBe(1);
+    expect(mockGetWordZh).not.toHaveBeenCalled();
+    expect(mockSetWordZhIfEmpty).not.toHaveBeenCalled();
   });
 });

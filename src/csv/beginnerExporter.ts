@@ -38,6 +38,7 @@ const WORDS_HEADERS = [
   'definition_en', 'definition_en_source',
   'context_sentence', 'context_sentence_zh', 'context_sentence_zh_source',
   'definition_zh', 'definition_zh_source',
+  'word_zh', 'word_zh_source',
 ];
 
 export function exportBeginnerWordsSplit(
@@ -75,6 +76,8 @@ export function exportBeginnerWordsSplit(
         '',               // context_sentence_zh_source
         token.definition_zh,
         '',               // definition_zh_source
+        '',               // word_zh：留空供翻譯填入
+        '',               // word_zh_source
       ]));
     }
     fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');

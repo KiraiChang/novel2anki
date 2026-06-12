@@ -425,7 +425,7 @@ program
           // 已全部翻譯且非強制模式：阻斷並提示清除方式
           if (!force && est.untranslatedCount === 0) {
             console.log(chalk.yellow('⚠ 此 CSV 已完整翻譯，無法重複提交。'));
-            console.log(chalk.gray('  若需重新翻譯，請加上 --deepl-force 強制覆寫，'));
+            console.log(chalk.gray('  若需重新翻譯，請加上 --translate-force 強制覆寫，'));
             console.log(chalk.gray('  或手動清除 CSV 中 definition_zh / context_sentence_zh 欄位後再執行。'));
             process.exit(1);
           }
