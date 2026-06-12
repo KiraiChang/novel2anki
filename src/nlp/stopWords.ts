@@ -34,4 +34,6 @@ export const STOP_WORDS = new Set([
   'until','unless','even','only','quite','rather','very','too','enough',
   'already','still','yet','again','together','without','around','through',
   'during','within','throughout','despite','toward','towards',
+  // 補充：CEFR 字庫中存在但無需 MW 定義或字卡的功能詞
+  'nor','cannot','ah','hey','hi','oh','yeah',
 ]);

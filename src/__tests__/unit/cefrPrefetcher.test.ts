@@ -29,7 +29,7 @@ const origMwKey  = process.env.MW_API_KEY;
 const origFetch  = global.fetch;
 
 // 測試用詞列表（3 個詞，避免跑真實 5782 筆）
-const TEST_WORDS = ['run', 'bear', 'go'];
+const TEST_WORDS = ['bridge', 'bear', 'ancient'];
 
 const DEEPL_CONFIG = { provider: 'deepl' as const, apiKey: 'test-deepl-key' };
 
@@ -61,7 +61,7 @@ describe('prefetchCefrToWordCache — cache hit', () => {
     mockCache.get.mockReturnValue({ def: '(verb) curated', tier: 'dict' });
     const progress: string[] = [];
     // When
-    await prefetchCefrToWordCache((_, __, meta) => progress.push(meta.source), ['run']);
+    await prefetchCefrToWordCache((_, __, meta) => progress.push(meta.source), ['bridge']);
     // Then
     expect(progress).toEqual(['dict']);
     expect(mockCache.setCache).not.toHaveBeenCalled();
@@ -71,7 +71,7 @@ describe('prefetchCefrToWordCache — cache hit', () => {
     // Given: hasPosCache returns true → POS entries already correct
     mockCache.hasPosCache.mockReturnValue(true);
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.skippedCount).toBe(1);
     expect(result.fetchedCount).toBe(0);
@@ -83,7 +83,7 @@ describe('prefetchCefrToWordCache — cache hit', () => {
     mockCache.get.mockReturnValue({ def: '(verb) to sprint', tier: 'cache' });
     mockCache.hasPosCache.mockReturnValue(false);
     // When: no MW key → failedCount (but NOT skipped)
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then: attempted fetch (failed due to no key), not skipped
     expect(result.skippedCount).toBe(0);
     expect(result.failedCount).toBe(1);
@@ -102,6 +102,48 @@ describe('prefetchCefrToWordCache — cache hit', () => {
   });
 });
 
+// ── STOP_WORDS 跳過 ───────────────────────────────────────────────────────────
+
+describe('prefetchCefrToWordCache — STOP_WORDS skip', () => {
+  it('should skip word in STOP_WORDS and report source=skip', async () => {
+    // Given: 'the' is in STOP_WORDS
+    const sources: string[] = [];
+    // When
+    await prefetchCefrToWordCache((_, __, meta) => sources.push(meta.source), ['the']);
+    // Then
+    expect(sources).toEqual(['skip']);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('should count STOP_WORDS words in skippedCount and not call MW API', async () => {
+    // Given: all three are in STOP_WORDS
+    process.env.MW_API_KEY = 'test-key';
+    // When
+    const result = await prefetchCefrToWordCache(undefined, ['the', 'would', 'ah']);
+    // Then
+    expect(result.skippedCount).toBe(3);
+    expect(result.fetchedCount).toBe(0);
+    expect(result.failedCount).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('should process non-STOP_WORDS words normally when mixed with STOP_WORDS words', async () => {
+    // Given: 'the' → skip；'bridge' → MW fetch
+    process.env.MW_API_KEY = 'test-key';
+    mockCache.hasPosCache.mockReturnValue(false);
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => [{ meta: { id: 'bridge' }, fl: 'verb', shortdef: ['to move on foot rapidly'] }],
+    });
+    // When
+    const result = await prefetchCefrToWordCache(undefined, ['the', 'bridge']);
+    // Then: 'the' skipped，'run' fetched
+    expect(result.skippedCount).toBe(1);
+    expect(result.fetchedCount).toBe(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── 無 MW_API_KEY ─────────────────────────────────────────────────────────────
 
 describe('prefetchCefrToWordCache — no MW_API_KEY', () => {
@@ -109,7 +151,7 @@ describe('prefetchCefrToWordCache — no MW_API_KEY', () => {
     // Given: cache miss, no MW key
     mockCache.get.mockReturnValue(null);
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
     expect(global.fetch).not.toHaveBeenCalled();
@@ -119,7 +161,7 @@ describe('prefetchCefrToWordCache — no MW_API_KEY', () => {
     // Given
     const sources: string[] = [];
     // When
-    await prefetchCefrToWordCache((_, __, meta) => sources.push(meta.source), ['run']);
+    await prefetchCefrToWordCache((_, __, meta) => sources.push(meta.source), ['bridge']);
     // Then
     expect(sources).toEqual(['no-key']);
   });
@@ -136,10 +178,10 @@ describe('prefetchCefrToWordCache — MW API success', () => {
       json: async () => [{ fl: 'verb', shortdef: ['to move on foot rapidly'] }],
     });
     // When
-    await prefetchCefrToWordCache(undefined, ['run']);
+    await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('run'),
+      expect.stringContaining('bridge'),
       expect.anything(),
     );
   });
@@ -155,10 +197,10 @@ describe('prefetchCefrToWordCache — MW API success', () => {
       ],
     });
     // When
-    await prefetchCefrToWordCache(undefined, ['run']);
+    await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
-    expect(mockCache.setCache).toHaveBeenCalledWith('run', 'verb', expect.stringContaining('to move on foot'), 'MW');
-    expect(mockCache.setCache).toHaveBeenCalledWith('run', 'noun', expect.stringContaining('a race or contest'), 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('bridge', 'verb', expect.stringContaining('to move on foot'), 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('bridge', 'noun', expect.stringContaining('a race or contest'), 'MW');
   });
 
   it('should NOT overwrite first POS entry with later compound-word entries sharing same POS', async () => {
@@ -197,9 +239,9 @@ describe('prefetchCefrToWordCache — MW API success', () => {
       ],
     });
     // When
-    await prefetchCefrToWordCache(undefined, ['run']);
+    await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then: null = POS-agnostic base key
-    expect(mockCache.setCache).toHaveBeenCalledWith('run', null, expect.stringContaining('to move on foot'), 'MW');
+    expect(mockCache.setCache).toHaveBeenCalledWith('bridge', null, expect.stringContaining('to move on foot'), 'MW');
   });
 
   it('should increment fetchedCount and report source=MW on success', async () => {
@@ -210,7 +252,7 @@ describe('prefetchCefrToWordCache — MW API success', () => {
       json: async () => [{ fl: 'verb', shortdef: ['to move on foot rapidly'] }],
     });
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.fetchedCount).toBe(1);
     expect(result.failedCount).toBe(0);
@@ -225,7 +267,7 @@ describe('prefetchCefrToWordCache — MW API failures', () => {
     process.env.MW_API_KEY = 'test-key';
     (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 403 });
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
     expect(mockCache.setCache).not.toHaveBeenCalled();
@@ -240,7 +282,7 @@ describe('prefetchCefrToWordCache — MW API failures', () => {
       json: async () => ['runner', 'running', 'runway'],
     });
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
     expect(mockCache.setCache).not.toHaveBeenCalled();
@@ -251,7 +293,7 @@ describe('prefetchCefrToWordCache — MW API failures', () => {
     process.env.MW_API_KEY = 'test-key';
     (global.fetch as jest.Mock).mockRejectedValue(new Error('network error'));
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
     expect(mockCache.setCache).not.toHaveBeenCalled();
@@ -262,10 +304,10 @@ describe('prefetchCefrToWordCache — MW API failures', () => {
     process.env.MW_API_KEY = 'test-key';
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      json: async () => [{ fl: 'verb', shortdef: ['run'] }], // too short (< 10 chars)
+      json: async () => [{ fl: 'verb', shortdef: ['bridge'] }], // too short (< 10 chars)
     });
     // When
-    const result = await prefetchCefrToWordCache(undefined, ['run']);
+    const result = await prefetchCefrToWordCache(undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
   });
@@ -322,9 +364,9 @@ describe('prefetchCefrToWordCache — flush and counts', () => {
   });
 
   it('should return correct counts for mixed results', async () => {
-    // Given: run → has POS cache (skip), bear → MW success, go → fetch error
+    // Given: bridge → has POS cache (skip), bear → MW success, ancient → fetch error
     process.env.MW_API_KEY = 'test-key';
-    mockCache.hasPosCache.mockImplementation((w: string) => w === 'run');
+    mockCache.hasPosCache.mockImplementation((w: string) => w === 'bridge');
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({
         ok: true,
@@ -348,9 +390,9 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
     // Given: run 有 verb 條目，且 verb + default 都已翻譯；word_zh 也已快取（避免觸發 word_zh 批次）
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
     mockCache.hasChinese.mockReturnValue(true);
-    mockCache.getWordZh.mockReturnValue('跑步');
+    mockCache.getWordZh.mockReturnValue('橋樑');
     // When
-    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
     expect(result.skippedCount).toBe(1);
     expect(result.fetchedCount).toBe(0);
@@ -361,10 +403,10 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
     // Given: word_zh 也已快取
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
     mockCache.hasChinese.mockReturnValue(true);
-    mockCache.getWordZh.mockReturnValue('跑步');
+    mockCache.getWordZh.mockReturnValue('橋樑');
     const sources: string[] = [];
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['bridge']);
     // Then
     expect(sources).toEqual(['cached']);
   });
@@ -376,7 +418,7 @@ describe('prefetchCefrZhToWordCache — no English definition', () => {
     mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
     mockCache.getWordZh.mockReturnValue('已快取');
     // When
-    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
     expect(result.noEnCount).toBe(1);
     expect(result.fetchedCount).toBe(0);
@@ -390,7 +432,7 @@ describe('prefetchCefrZhToWordCache — translation', () => {
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
     expect(batchTranslate).toHaveBeenCalledWith(
       expect.arrayContaining(['(verb) to sprint']),
@@ -403,9 +445,9 @@ describe('prefetchCefrZhToWordCache — translation', () => {
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: POS 鍵帶 source
-    expect(mockCache.setChinese).toHaveBeenCalledWith('run', 'verb', '快速奔跑', 'deepl');
+    expect(mockCache.setChinese).toHaveBeenCalledWith('bridge', 'verb', '快速奔跑', 'deepl');
   });
 
   it('should increment fetchedCount once per word on successful translation', async () => {
@@ -413,7 +455,7 @@ describe('prefetchCefrZhToWordCache — translation', () => {
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑']);
     // When
-    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
     expect(result.fetchedCount).toBe(1);
     expect(result.failedCount).toBe(0);
@@ -424,7 +466,7 @@ describe('prefetchCefrZhToWordCache — translation', () => {
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to sprint' }]);
     (batchTranslate as jest.Mock).mockRejectedValue(new Error('DeepL quota exceeded'));
     // When
-    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
     expect(result.failedCount).toBe(1);
     expect(mockCache.setChinese).not.toHaveBeenCalled();
@@ -481,11 +523,11 @@ describe('prefetchCefrZhToWordCache — flush and counts', () => {
   it('should return correct counts for mixed results', async () => {
     // Given: run→全部已快取(skip), bear→有 noun 待翻譯, go→無英文條目
     mockCache.getAllCacheEntriesForWord.mockImplementation((word: string) => {
-      if (word === 'run')  return [{ pos: 'verb', def: '(verb) to run fast' }];
+      if (word === 'bridge')  return [{ pos: 'verb', def: '(verb) to run fast' }];
       if (word === 'bear') return [{ pos: 'noun', def: '(noun) a large mammal' }];
       return [];  // go → no en
     });
-    mockCache.hasChinese.mockImplementation((word: string) => word === 'run');
+    mockCache.hasChinese.mockImplementation((word: string) => word === 'bridge');
     (batchTranslate as jest.Mock).mockResolvedValue(['熊']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
@@ -539,9 +581,9 @@ describe('prefetchCefrZhToWordCache — POS-specific translation', () => {
     mockCache.hasChinese.mockReturnValue(false);
     (batchTranslate as jest.Mock).mockResolvedValue(['快速奔跑', '奔跑的']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: 無名詞時取第一個 POS（verb）的翻譯作為預設
-    expect(mockCache.setChinese).toHaveBeenCalledWith('run', null, '快速奔跑', 'deepl:derived');
+    expect(mockCache.setChinese).toHaveBeenCalledWith('bridge', null, '快速奔跑', 'deepl:derived');
   });
 
   it('should skip already-cached POS entries and only translate uncached ones', async () => {
@@ -853,9 +895,9 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     mockCache.getWordZh.mockReturnValue(null);
     (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: 以 lemma 本身呼叫翻譯
-    expect(batchTranslate).toHaveBeenCalledWith(['run'], DEEPL_CONFIG);
+    expect(batchTranslate).toHaveBeenCalledWith(['bridge'], DEEPL_CONFIG);
   });
 
   it('should store word_zh via setWordZhIfEmpty with provider source', async () => {
@@ -865,9 +907,9 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     mockCache.getWordZh.mockReturnValue(null);
     (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then
-    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('run', null, '跑', 'deepl');
+    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('bridge', null, '跑', 'deepl');
   });
 
   it('should skip word_zh translation when already cached in word-cache-zh.json', async () => {
@@ -876,7 +918,7 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     mockCache.hasChinese.mockReturnValue(true);
     mockCache.getWordZh.mockReturnValue('奔跑');
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: 不呼叫翻譯 API，不寫入快取
     expect(batchTranslate).not.toHaveBeenCalled();
     expect(mockCache.setWordZhIfEmpty).not.toHaveBeenCalled();
@@ -888,11 +930,11 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     mockCache.getWordZh.mockReturnValue(null);
     (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
     // When
-    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: 定義翻譯跳過（noEnCount=1），但 word_zh 仍被翻譯
     expect(result.noEnCount).toBe(1);
-    expect(batchTranslate).toHaveBeenCalledWith(['run'], DEEPL_CONFIG);
-    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('run', null, '跑', 'deepl');
+    expect(batchTranslate).toHaveBeenCalledWith(['bridge'], DEEPL_CONFIG);
+    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('bridge', null, '跑', 'deepl');
   });
 
   it('should NOT store word_zh when batchTranslate returns empty string', async () => {
@@ -901,7 +943,7 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     mockCache.getWordZh.mockReturnValue(null);
     (batchTranslate as jest.Mock).mockResolvedValue(['']);
     // When
-    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['bridge']);
     // Then: 空字串不寫入
     expect(mockCache.setWordZhIfEmpty).not.toHaveBeenCalled();
   });
@@ -930,7 +972,7 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, (done, total, meta) => {
       progressCalls.push({ done, total, source: meta.source, word: meta.word });
-    }, ['run']);
+    }, ['bridge']);
     // Then: 第一筆 word_zh 進度為哨兵（done=0, word='', total=1）
     const sentinel = progressCalls.find(p => p.source === 'word_zh' && p.done === 0);
     expect(sentinel).toEqual({ done: 0, total: 1, source: 'word_zh', word: '' });
@@ -951,9 +993,9 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     }, TEST_WORDS);
     // Then: 每個詞依序回報進度（done 遞增，word 為 lemma）
     expect(wordZhProgress).toEqual([
-      { done: 1, word: 'run' },
+      { done: 1, word: 'bridge' },
       { done: 2, word: 'bear' },
-      { done: 3, word: 'go' },
+      { done: 3, word: 'ancient' },
     ]);
   });
 
@@ -961,7 +1003,7 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     // Given: run 已有 word_zh 快取，bear 和 go 沒有
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
     mockCache.hasChinese.mockReturnValue(true);
-    mockCache.getWordZh.mockImplementation((word: string) => word === 'run' ? '跑步' : null);
+    mockCache.getWordZh.mockImplementation((word: string) => word === 'bridge' ? '橋樑' : null);
     (batchTranslate as jest.Mock).mockResolvedValue(['熊', '去']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
@@ -985,9 +1027,9 @@ describe('prefetchCefrZhToWordCache — missing words report', () => {
     (batchTranslate as jest.Mock).mockResolvedValue(['跑', '熊', '去']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
-    // Then: run 和 go 無 EN → 都在 missingEnWords；bear 有 EN cache
+    // Then: bridge 和 ancient 無 EN → 都在 missingEnWords；bear 有 EN cache
     // 注意：get() mock 全回 null，所以三個詞都在 missingEnWords
-    expect(result.missingEnWords).toEqual(expect.arrayContaining(['run', 'go']));
+    expect(result.missingEnWords).toEqual(expect.arrayContaining(['bridge', 'ancient']));
     expect(result.missingEnWords).toHaveLength(3);  // 全都 null
   });
 
@@ -1013,7 +1055,7 @@ describe('prefetchCefrZhToWordCache — missing words report', () => {
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
     // Then: 翻譯失敗，ZH 仍然缺失
-    expect(result.missingZhWords).toEqual(expect.arrayContaining(['run', 'bear', 'go']));
+    expect(result.missingZhWords).toEqual(expect.arrayContaining(['bridge', 'bear', 'ancient']));
   });
 
   it('should not include words that have getChinese value in missingZhWords', async () => {
@@ -1054,5 +1096,46 @@ describe('prefetchCefrZhToWordCache — missing words report', () => {
     // Then
     expect(result.missingEnWords).toHaveLength(0);
     expect(result.missingZhWords).toHaveLength(0);
+  });
+});
+
+// ── prefetchCefrZhToWordCache — STOP_WORDS 跳過 ──────────────────────────────
+
+describe('prefetchCefrZhToWordCache — STOP_WORDS skip', () => {
+  it('should skip STOP_WORDS word in preparation loop and report source=skip', async () => {
+    // Given: 'the' is in STOP_WORDS
+    const sources: string[] = [];
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['the']);
+    // Then
+    expect(sources).toEqual(['skip']);
+    expect(batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it('should count STOP_WORDS words in skippedCount', async () => {
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['the', 'would', 'nor']);
+    // Then
+    expect(result.skippedCount).toBe(3);
+    expect(batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it('should not include STOP_WORDS words in missingEnWords even when wc.get returns null', async () => {
+    // Given: simulate no EN cache; 'the' and 'would' are STOP_WORDS
+    mockCache.get.mockReturnValue(null);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['the', 'would']);
+    // Then: STOP_WORDS → excluded from final missing scan
+    expect(result.missingEnWords).toHaveLength(0);
+  });
+
+  it('should not include STOP_WORDS words in word_zh batch even when word_zh is not cached', async () => {
+    // Given: 'the' is in STOP_WORDS and has no word_zh cache
+    mockCache.getWordZh.mockReturnValue(null);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['the']);
+    // Then: STOP_WORDS → excluded from word_zh batch
+    expect(result.wordZhPendingCount).toBe(0);
+    expect(batchTranslate).not.toHaveBeenCalled();
   });
 });

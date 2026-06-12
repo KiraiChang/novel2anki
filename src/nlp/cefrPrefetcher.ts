@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { resolveDataPath } from './dataPath';
 import { getWordCache } from './wordCache';
 import { batchTranslate, TranslatorConfig } from '../cards/translator';
+import { STOP_WORDS } from './stopWords';
 const MW_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 
 interface MWEntry {
@@ -23,7 +24,7 @@ const isUsable = (def: string) => {
 
 export interface PrefetchProgress {
   word: string;
-  source: 'dict' | 'cached' | 'MW' | 'no-def' | 'error' | 'no-key';
+  source: 'dict' | 'cached' | 'MW' | 'no-def' | 'error' | 'no-key' | 'skip';
 }
 
 export interface PrefetchResult {
@@ -55,6 +56,13 @@ export async function prefetchCefrToWordCache(
 
   for (let i = 0; i < cefrWords.length; i++) {
     const word = cefrWords[i];
+
+    // 功能詞（代名詞、助動詞、介係詞等）跳過，MW 不會有有用的定義
+    if (STOP_WORDS.has(word)) {
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'skip' });
+      continue;
+    }
 
     // dict 條目優先等級最高，永遠跳過
     const hit = wc.get(word, null);
@@ -143,7 +151,7 @@ export async function prefetchCefrToWordCache(
 
 export interface PrefetchZhProgress {
   word: string;
-  source: 'cached' | 'deepl' | 'no-en' | 'error' | 'word_zh' | 'word_zh:error';
+  source: 'cached' | 'deepl' | 'no-en' | 'error' | 'word_zh' | 'word_zh:error' | 'skip';
 }
 
 export interface PrefetchZhResult {
@@ -193,7 +201,15 @@ export async function prefetchCefrZhToWordCache(
   const wordsNeedingDefault = new Set<string>();
 
   for (let i = 0; i < cefrWords.length; i++) {
-    const word       = cefrWords[i];
+    const word = cefrWords[i];
+
+    // 功能詞跳過，不翻譯中文定義也不翻譯 word_zh
+    if (STOP_WORDS.has(word)) {
+      skippedCount++;
+      onProgress?.(i + 1, cefrWords.length, { word, source: 'skip' });
+      continue;
+    }
+
     const allEntries = wc.getAllCacheEntriesForWord(word);
     const posEntries = allEntries.filter(e => e.pos !== null);
 
@@ -293,6 +309,7 @@ export async function prefetchCefrZhToWordCache(
   // 獨立於定義翻譯批次，對每個 CEFR 詞直接翻譯 lemma 本身（如 "bridge" → "橋樑"）
   const wordZhMissing: Array<{ word: string }> = [];
   for (const word of cefrWords) {
+    if (STOP_WORDS.has(word)) continue;
     if (!wc.getWordZh(word, null)) wordZhMissing.push({ word });
   }
 
@@ -330,10 +347,11 @@ export async function prefetchCefrZhToWordCache(
 
   wc.flush();
 
-  // 最終狀態掃描：找出仍缺 EN 或 ZH 的 CEFR 詞
+  // 最終狀態掃描：找出仍缺 EN 或 ZH 的 CEFR 詞（功能詞不納入統計）
   const missingEnWords: string[] = [];
   const missingZhWords: string[] = [];
   for (const word of cefrWords) {
+    if (STOP_WORDS.has(word)) continue;
     if (!wc.get(word, null)) missingEnWords.push(word);
     if (!wc.getChinese(word, null) && !wc.getWordZh(word, null)) missingZhWords.push(word);
   }

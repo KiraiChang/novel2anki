@@ -205,6 +205,7 @@ program
           meta.source === 'MW'     ? chalk.green('[MW]')      :
           meta.source === 'cached' ? chalk.blue('[快取]')     :
           meta.source === 'dict'   ? chalk.magenta('[字典]')  :
+          meta.source === 'skip'   ? chalk.gray('[跳過]')     :
           meta.source === 'no-key' ? chalk.red('[無 KEY]')    :
           meta.source === 'no-def' ? chalk.gray('[查無]')     :
                                      chalk.red('[錯誤]');
@@ -255,6 +256,7 @@ program
           const sourceTag =
             meta.source === 'deepl'  ? chalk.blue(`[${providerLabel}]`) :
             meta.source === 'cached' ? chalk.green('[快取]') :
+            meta.source === 'skip'   ? chalk.gray('[跳過]') :
             meta.source === 'no-en'  ? chalk.gray('[無英文]') :
                                        chalk.red('[錯誤]');
           process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
