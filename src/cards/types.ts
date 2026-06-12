@@ -7,6 +7,8 @@ export interface Chunk {
 export interface VocabCard {
   type: 'vocab';
   word: string;
+  definition_en?: string;   // 英文定義（初學者模式，definition_en）
+  word_zh?: string;         // 單字中文翻譯（初學者模式，word_zh）
   definition_zh: string;
   exampleFromText: string;
   exampleZh?: string;       // 例句中文翻譯（初學者模式，context_sentence_zh）

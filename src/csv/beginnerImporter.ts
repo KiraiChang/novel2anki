@@ -74,10 +74,14 @@ export function importBeginnerWords(csvPath: string): VocabCard[] {
   for (let i = 1; i < lines.length; i++) {
     const cols = parseRow(lines[i]);
     const get = (col: string) => cols[idx[col]] ?? '';
-    const exampleZh = get('context_sentence_zh').trim();
+    const exampleZh   = get('context_sentence_zh').trim();
+    const definitionEn = get('definition_en').trim();
+    const wordZh       = get('word_zh').trim();
     cards.push({
       type: 'vocab',
       word: get('lemma'),
+      ...(definitionEn ? { definition_en: definitionEn } : {}),
+      ...(wordZh ? { word_zh: wordZh } : {}),
       definition_zh: get('definition_zh').trim(),
       exampleFromText: get('context_sentence'),
       ...(exampleZh ? { exampleZh } : {}),
@@ -141,11 +145,15 @@ export function importBeginnerWordsFromFiles(csvPaths: string[]): VocabCard[] {
       if (!lemma || seen.has(lemma)) continue;
       seen.add(lemma);
 
-      const exampleZh = get('context_sentence_zh').trim();
+      const exampleZh    = get('context_sentence_zh').trim();
+      const definitionEn = get('definition_en').trim();
+      const wordZh       = get('word_zh').trim();
       ranked.push({
         card: {
           type: 'vocab' as const,
           word: lemma,
+          ...(definitionEn ? { definition_en: definitionEn } : {}),
+          ...(wordZh ? { word_zh: wordZh } : {}),
           definition_zh: get('definition_zh').trim(),
           exampleFromText: get('context_sentence'),
           ...(exampleZh ? { exampleZh } : {}),

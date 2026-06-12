@@ -155,8 +155,8 @@ export async function exportToApkg(
   let due = 1;
 
   for (const card of cards.vocab) {
-    const front = `<div class="word">${card.word}</div>`;
-    const back = `<div class="definition">${card.definition_zh}</div><div class="example">${card.exampleFromText}</div>`;
+    const front = `<div class="word">${card.word}</div>${card.definition_en ? `<div class="definition-en">${card.definition_en}</div>` : ''}`;
+    const back  = `${card.word_zh ? `<div class="word-zh">${card.word_zh}</div>` : ''}<div class="definition">${card.definition_zh}</div><div class="example">${card.exampleFromText}</div>${card.exampleZh ? `<div class="example">${card.exampleZh}</div>` : ''}`;
     const nid = insertNote(db, MODEL_BASIC_ID, [front, back]);
     insertCard(db, nid, 0, due++);
   }

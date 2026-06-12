@@ -33,6 +33,8 @@ function vocabSection(cards: VocabCard[], interactive = false): string {
     if (!interactive) return `
     <div class="card vocab">
       <div class="word">${escapeHtml(c.word)}</div>
+      ${c.definition_en ? `<div class="definition-en">${escapeHtml(c.definition_en)}</div>` : ''}
+      ${c.word_zh ? `<div class="word-zh">${escapeHtml(c.word_zh)}</div>` : ''}
       <div class="definition">${escapeHtml(c.definition_zh)}</div>
       <div class="example">${escapeHtml(c.exampleFromText)}</div>
       ${c.exampleZh ? `<div class="example-zh">${escapeHtml(c.exampleZh)}</div>` : ''}
@@ -41,10 +43,12 @@ function vocabSection(cards: VocabCard[], interactive = false): string {
     <div class="card vocab flip-card" tabindex="0" onclick="this.classList.toggle('revealed')" title="點擊顯示／隱藏中文">
       <div class="card-front">
         <div class="word">${escapeHtml(c.word)}</div>
+        ${c.definition_en ? `<div class="definition-en">${escapeHtml(c.definition_en)}</div>` : ''}
         <div class="example">${escapeHtml(c.exampleFromText)}</div>
         <span class="toggle-hint">點擊顯示中文定義 ▼</span>
       </div>
       <div class="card-back">
+        ${c.word_zh ? `<div class="word-zh">${escapeHtml(c.word_zh)}</div>` : ''}
         <div class="definition">${escapeHtml(c.definition_zh) || '<span class="empty">（尚未填入）</span>'}</div>
         ${c.exampleZh ? `<div class="example-zh">${escapeHtml(c.exampleZh)}</div>` : ''}
       </div>
@@ -173,6 +177,8 @@ const SHARED_CSS = `
   /* ── vocab ── */
   .vocab { border-left-color: #3498db; }
   .word { font-size: 20px; font-weight: 700; color: #2980b9; margin-bottom: 6px; }
+  .definition-en { color: #999; font-size: 13px; margin-bottom: 6px; }
+  .word-zh { font-size: 16px; font-weight: 700; color: #27ae60; margin-bottom: 4px; }
   .definition { color: #444; margin-bottom: 4px; }
   .example {
     color: #666; font-style: italic;
