@@ -317,17 +317,21 @@ export function exportToComparisonHtml(
 // ── Flash 單字卡模式 ─────────────────────────────────────────────────────────
 
 interface FlashCard {
-  primary: string;   // 大字（單字 / 人名 / 問題 / 克漏字句）
-  secondary: string; // 小字（例句 / firstMention / ''）
-  answer: string;    // 翻面後的答案
+  primary: string;    // 大字（單字 / 人名 / 問題 / 克漏字句）
+  secondary: string;  // 小字（definition_en / firstMention / ''）
+  answer: string;     // 翻面後的答案
+  word_zh?: string;   // 背面頂部顯示的中文對應詞（vocab 專用）
 }
 
 function buildFlashDeck(cards: GeneratedCards): Record<string, FlashCard[]> {
   return {
     vocab: cards.vocab.map(c => ({
       primary: c.word,
-      secondary: c.exampleFromText,
-      answer: (c.definition_zh || '（尚未填入定義）') + (c.exampleZh ? '\n\n' + c.exampleZh : ''),
+      secondary: c.definition_en ?? '',
+      answer: (c.definition_zh || '（尚未填入定義）') +
+              '\n\n' + c.exampleFromText +
+              (c.exampleZh ? '\n' + c.exampleZh : ''),
+      word_zh: c.word_zh,
     })),
     cloze: cards.cloze.map(c => ({
       primary: c.text.replace(/\{\{c\d+::([^}]+)\}\}/g, '___'),
@@ -432,11 +436,15 @@ main {
   line-height: 1.45; word-break: break-word;
 }
 .fc-secondary {
-  font-size: 13px; color: #888; font-style: italic;
+  font-size: 13px; color: #888;
   margin-top: 12px; line-height: 1.6; max-height: 80px; overflow-y: auto;
 }
 .fc-secondary:empty { display: none; }
 .fc-flip-hint { font-size: 11px; color: #ccc; margin-top: auto; padding-top: 10px; }
+.fc-word-zh {
+  font-size: 22px; font-weight: 700; color: #27ae60; margin-bottom: 8px;
+}
+.fc-word-zh:empty { display: none; }
 .fc-answer {
   font-size: 18px; color: #2c3e50; line-height: 1.75;
   white-space: pre-line; text-align: center; word-break: break-word;
@@ -503,6 +511,7 @@ function buildFlashHtmlFromData(
           <div class="fc-flip-hint">點擊卡片 / 空白鍵 翻面 ▼</div>
         </div>
         <div class="fc-back">
+          <div id="fc-word-zh" class="fc-word-zh"></div>
           <div id="fc-answer" class="fc-answer"></div>
           <div class="fc-flip-hint">點擊卡片 / 空白鍵 翻回 ▲</div>
         </div>
@@ -532,6 +541,8 @@ function render() {
   const c = cards[idx];
   document.getElementById('fc-primary').innerHTML = rend(c.primary);
   document.getElementById('fc-secondary').innerHTML = rend(c.secondary);
+  const wzEl = document.getElementById('fc-word-zh');
+  if (wzEl) wzEl.textContent = c.word_zh || '';
   document.getElementById('fc-answer').innerHTML = rend(c.answer);
   document.getElementById('prog').textContent = (idx + 1) + ' / ' + cards.length;
   document.getElementById('fc').classList.toggle('flipped', flipped);
