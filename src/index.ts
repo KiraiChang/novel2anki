@@ -595,10 +595,8 @@ program
           console.log(`覆蓋率排名：#${bwStats.rankMin} – #${bwStats.rankMax}`);
         }
         console.log(chalk.green(`✓ 字彙統計 HTML：${statsResult.htmlPath}`));
-        if (statsResult.missingJsonPath)
-          console.log(chalk.gray(`  缺翻譯清單：  ${statsResult.missingJsonPath}`));
-        if (statsResult.missingSentenceJsonPath)
-          console.log(chalk.gray(`  缺例句翻譯：  ${statsResult.missingSentenceJsonPath}`));
+        statsResult.missingJsonPaths.forEach(p => console.log(chalk.gray(`  缺翻譯清單：  ${p}`)));
+        statsResult.missingSentenceJsonPaths.forEach(p => console.log(chalk.gray(`  缺例句翻譯：  ${p}`)));
 
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));

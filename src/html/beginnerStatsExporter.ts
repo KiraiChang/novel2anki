@@ -170,8 +170,8 @@ function missingSection(opts: {
 
 export interface BeginnerStatsExportResult {
   htmlPath: string;
-  missingJsonPath: string | null;
-  missingSentenceJsonPath: string | null;
+  missingJsonPaths: string[];
+  missingSentenceJsonPaths: string[];
 }
 
 export function exportBeginnerStatsToHtml(
@@ -567,20 +567,37 @@ tr:hover td{background:#f8fafc}
   fs.mkdirSync(outputDir, { recursive: true });
 
   const htmlPath             = path.join(outputDir, `${slug}-beginner-stats.html`);
-  const missingJsonPath      = path.join(outputDir, `${slug}-missing.json`);
-  const missingSentenceJsonPath = path.join(outputDir, `${slug}-missing-sentence.json`);
-
   fs.writeFileSync(htmlPath, html, 'utf-8');
 
-  const hasMissing   = stats.words.some(w => !w.definition_en || !w.definition_zh || !w.word_zh);
-  const hasMissingSent = stats.words.some(w => !w.context_sentence_zh && w.context_sentence);
+  // 依 sourcePath 分組，為每個來源 CSV 各自產生 -missing.json / -missing-sentence.json
+  const groups = new Map<string, WordStat[]>();
+  for (const w of stats.words) {
+    if (!groups.has(w.sourcePath)) groups.set(w.sourcePath, []);
+    groups.get(w.sourcePath)!.push(w);
+  }
 
-  if (hasMissing)   exportMissingJson(stats.words, missingJsonPath);
-  if (hasMissingSent) exportMissingSentenceJson(stats.words, missingSentenceJsonPath);
+  const missingJsonPaths: string[] = [];
+  const missingSentenceJsonPaths: string[] = [];
 
-  return {
-    htmlPath,
-    missingJsonPath:         hasMissing     ? missingJsonPath      : null,
-    missingSentenceJsonPath: hasMissingSent ? missingSentenceJsonPath : null,
-  };
+  for (const [sourcePath, group] of groups) {
+    const base = sourcePath.endsWith('.csv')
+      ? sourcePath.slice(0, -4)
+      : sourcePath;
+
+    const hasMissing     = group.some(w => !w.definition_en || !w.definition_zh || !w.word_zh);
+    const hasMissingSent = group.some(w => !w.context_sentence_zh && w.context_sentence);
+
+    if (hasMissing) {
+      const p = `${base}-missing.json`;
+      exportMissingJson(group, p);
+      missingJsonPaths.push(p);
+    }
+    if (hasMissingSent) {
+      const p = `${base}-missing-sentence.json`;
+      exportMissingSentenceJson(group, p);
+      missingSentenceJsonPaths.push(p);
+    }
+  }
+
+  return { htmlPath, missingJsonPaths, missingSentenceJsonPaths };
 }
