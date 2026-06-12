@@ -46,7 +46,6 @@ npx ts-node src/index.ts <輸入> [選項]
   --beginner-min-freq <N> 詞彙最低出現次數（預設：2）
   --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
   --beginner-split <N>    將翻譯 CSV 分割為每 N 個詞彙一個檔案（搭配 --beginner）
-  --missing-split <N>     將缺漏 CSV 每 N 筆分割為一個檔案（搭配 beginner words CSV 匯出統計）
   --mw                    MW 預查：預先查詢英文定義寫入 CSV 的 definition_en 欄（需設定 MW_API_KEY）
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
@@ -250,7 +249,7 @@ output/{deck}-reading-ch-03-03-chapters.csv   # 第 41–60 章
 
 | 類型 | 正面 | 背面 |
 |------|------|------|
-| vocab | 單字 ＋ 英文例句 | 繁體中文定義（＋例句中文翻譯，若有填入） |
+| vocab | 單字 ＋ 英文定義（若有填入） | 單字中文對應詞 ＋ 繁體中文定義 ＋ 英文例句（＋例句中文翻譯，若有填入） |
 | cloze | 挖空句（`___`） | 提示 ＋ 含答案原句（`【word】`）|
 | character | 人名 ＋ 首次出現原句 | 繁體中文描述 |
 | plot | 中文問題 | 答案 |
@@ -337,6 +336,15 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `*-beginner-words.csv` | 14 | 精簡翻譯用，適合手動或 DeepL 翻譯 |
 | `*-beginner-words-part-NN.csv` | 14 | 分割版（搭配 `--beginner-split`），逐批翻譯後放回目錄合併 |
 | `*-beginner-names.txt` | — | 人名與專有名詞清單，翻譯前可手動編輯，`--translate` 自動讀取。支援兩種格式：`Elbryan`（保留英文原名）或 `Markwart: 馬克瓦特`（指定中文音譯） |
+
+翻譯完成後，將 CSV 打包成 Anki 字卡時，會在每個 CSV 旁邊自動產生缺漏清單（僅當有缺漏詞時才建立）：
+
+| 檔案 | 說明 |
+|------|------|
+| `{csv名稱}-missing.json` | 缺 `definition_en`、`definition_zh` 或 `word_zh` 任一欄的詞，格式同 `missing-cefr-words.json`（含 `word`、`missing[]`、三欄當前值） |
+| `{csv名稱}-missing-sentence.json` | 缺 `context_sentence_zh` 的詞，格式同 `sentence-cache.json`（key = 英文例句的 FNV-1a hash，value = `{en, zh:"", source:""}`） |
+
+這兩個檔案可作為人工補填的輸入：填好 `zh` 欄後，搭配 `--fill-sent-zh` 或 `--fill-def-zh` 匯回快取。
 
 **words CSV 欄位**（14 欄）：
 
