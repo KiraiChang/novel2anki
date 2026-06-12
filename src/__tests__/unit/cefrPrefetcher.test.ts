@@ -1071,17 +1071,19 @@ describe('prefetchCefrZhToWordCache — missing words report', () => {
     expect(result.missingZhWords).toHaveLength(0);
   });
 
-  it('should not include words that have word_zh value in missingZhWords', async () => {
+  it('should include words with missing definition_zh in missingZhWords even when word_zh exists', async () => {
     // Given: getChinese 無值，但 getWordZh 有值
-    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);    // no EN → noEnCount
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
     mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
     mockCache.getChinese.mockReturnValue(null);
     mockCache.getWordZh.mockReturnValue('直翻詞');
     (batchTranslate as jest.Mock).mockResolvedValue(['跑', '熊', '去']);
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
-    // Then: getWordZh 有值 → 不算缺 ZH
-    expect(result.missingZhWords).toHaveLength(0);
+    // Then: getChinese 無值 → 列入 missingZhWords（definition_zh 與 word_zh 分開追蹤）
+    expect(result.missingZhWords).toEqual(expect.arrayContaining(['bridge', 'bear', 'ancient']));
+    // word_zh 有值 → 不列入 missingWordZhWords
+    expect(result.missingWordZhWords).toHaveLength(0);
   });
 
   it('should return empty arrays when all words have both EN and ZH', async () => {
@@ -1096,6 +1098,7 @@ describe('prefetchCefrZhToWordCache — missing words report', () => {
     // Then
     expect(result.missingEnWords).toHaveLength(0);
     expect(result.missingZhWords).toHaveLength(0);
+    expect(result.missingWordZhWords).toHaveLength(0);
   });
 });
 
