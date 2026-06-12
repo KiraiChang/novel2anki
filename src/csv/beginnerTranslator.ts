@@ -1064,3 +1064,63 @@ export function pushCsvToCache(
   bookCache?.flush();
   return { pushed, skipped, noMatch, outputPath: csvPath };
 }
+
+// ── pushSentCacheFromCsv：強制將 CSV 例句翻譯蓋入 sentence-cache（單向）────────
+
+export interface PushSentCacheResult {
+  pushed:  number;  // 值有變動、實際寫入快取的列數
+  same:    number;  // 快取已有相同值、略過的列數
+  empty:   number;  // context_sentence_zh 為空的列數
+  noSent:  number;  // context_sentence 也為空的列數
+  outputPath: string;
+}
+
+/**
+ * 強制將 beginner words CSV 的 context_sentence_zh 覆寫入 sentence-cache.json，
+ * 不做優先序保護（CSV 內容一律勝出）。僅單向（CSV → cache），不補填 CSV。
+ */
+export function pushSentCacheFromCsv(
+  csvPath: string,
+  onProgress?: (current: number, total: number) => void,
+): PushSentCacheResult {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) {
+    return { pushed: 0, same: 0, empty: 0, noSent: 0, outputPath: csvPath };
+  }
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  const sentEnColIdx    = idx['context_sentence'];
+  const sentZhColIdx    = idx['context_sentence_zh'];
+  const sentZhSrcColIdx = idx['context_sentence_zh_source'];
+
+  if (sentEnColIdx === undefined || sentZhColIdx === undefined) {
+    return { pushed: 0, same: 0, empty: rows.length, noSent: 0, outputPath: csvPath };
+  }
+
+  const wc = getWordCache();
+  let pushed = 0;
+  let same   = 0;
+  let empty  = 0;
+  let noSent = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const enSent = get(rows[i], 'context_sentence').trim();
+    const zhSent = get(rows[i], 'context_sentence_zh').trim();
+    const zhSrc  = sentZhSrcColIdx !== undefined ? get(rows[i], 'context_sentence_zh_source').trim() : '';
+
+    if (!enSent) { noSent++; onProgress?.(i + 1, rows.length); continue; }
+    if (!zhSent) { empty++;  onProgress?.(i + 1, rows.length); continue; }
+
+    const changed = wc.setSentenceZhForce(enSent, zhSent, zhSrc || 'csv');
+    if (changed) pushed++; else same++;
+    onProgress?.(i + 1, rows.length);
+  }
+
+  wc.flush();
+  return { pushed, same, empty, noSent, outputPath: csvPath };
+}

@@ -282,6 +282,18 @@ export class WordCacheManager {
     return true;
   }
 
+  /** 強制覆寫例句中文翻譯快取，不做優先序檢查。回傳 true 表示值有變動。 */
+  setSentenceZhForce(en: string, zh: string, source: string): boolean {
+    const hash = fnv1a(en);
+    const existing = this.sentenceCache[hash];
+    const changed = !existing || existing.zh !== zh || existing.source !== source;
+    if (changed) {
+      this.sentenceCache[hash] = { en, zh, source };
+      this.sentenceCacheDirty = true;
+    }
+    return changed;
+  }
+
   /** 查詢片語 MW 定義；回傳 null 表示尚未查過，回傳空字串表示 MW 無此片語 */
   getPhrase(phrase: string): string | null {
     return this.phraseCache[phrase.toLowerCase().trim()]?.def ?? null;
