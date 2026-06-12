@@ -200,6 +200,22 @@ export class WordCacheManager {
     return this.cacheZh[exact]?.word_zh_source ?? this.cacheZh[base]?.word_zh_source ?? null;
   }
 
+  /** word_zh 強制覆寫（不論是否已有值），回傳是否實際變更 */
+  setWordZh(word: string, pos: string | null | undefined, zh: string, source: string): boolean {
+    const k = this.key(word, pos);
+    const entry = this.cacheZh[k];
+    if (entry) {
+      const changed = entry.word_zh !== zh || entry.word_zh_source !== source;
+      entry.word_zh = zh;
+      entry.word_zh_source = source;
+      if (changed) this.cacheZhDirty = true;
+      return changed;
+    }
+    this.cacheZh[k] = { zh: '', source: '', word_zh: zh, word_zh_source: source };
+    this.cacheZhDirty = true;
+    return true;
+  }
+
   /** word_zh 尚無值才寫入，回傳是否實際寫入 */
   setWordZhIfEmpty(word: string, pos: string | null | undefined, zh: string, source: string): boolean {
     const k = this.key(word, pos);
@@ -440,6 +456,15 @@ export class DefinitionLayerCache {
     return true;
   }
 
+  /** 強制覆寫中文定義（不論是否已有值），回傳是否實際變更 */
+  set(word: string, pos: string | null | undefined, zh: string, source = 'csv'): boolean {
+    const k = this.key(word, pos);
+    const existing = this.zhData[k];
+    const changed = !existing || existing.zh !== zh || existing.source !== source;
+    if (changed) { this.zhData[k] = { zh, source }; this.zhDirty = true; }
+    return changed;
+  }
+
   getEn(word: string, pos?: string | null): string | null {
     const exact = this.key(word, pos);
     const base  = this.key(word);
@@ -460,6 +485,15 @@ export class DefinitionLayerCache {
     this.enData[k] = { def, source };
     this.enDirty = true;
     return true;
+  }
+
+  /** 強制覆寫英文定義（不論是否已有值），回傳是否實際變更 */
+  setEn(word: string, pos: string | null | undefined, def: string, source = 'csv'): boolean {
+    const k = this.key(word, pos);
+    const existing = this.enData[k];
+    const changed = !existing || existing.def !== def || existing.source !== source;
+    if (changed) { this.enData[k] = { def, source }; this.enDirty = true; }
+    return changed;
   }
 
   flush(): void {

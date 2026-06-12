@@ -26,7 +26,7 @@ import { exportBeginnerTokensToCsv, exportBeginnerWordsToCsv, exportBeginnerWord
 import { findNormalizeFile, loadNormalizeFile, slugFromCsvPath } from './nlp/tokenNormalizer';
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
-import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, FillDefZhConfig } from './csv/beginnerTranslator';
+import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, pushCsvToCache, FillDefZhConfig } from './csv/beginnerTranslator';
 import { getWordCache } from './nlp/wordCache';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
@@ -74,6 +74,7 @@ program
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
   .option('--fill-sent-zh', '雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填')
   .option('--fill-def-zh [layers]', '雙向同步詞彙中文定義。可加 =domain,book 指定分層快取（例：--fill-def-zh=fantasy,the-demon-awakens）。未指定時只同步全局快取（CEFR 已知詞才寫入 global）')
+  .option('--push-cache [layers]', '強制將 CSV 所有翻譯欄（definition_zh / definition_en / word_zh）覆寫入快取（單向，CSV 優先）。可加 =domain,book 指定分層快取')
   .option('--prefetch-cefr', '批次預查 CEFR 字庫所有單字的 MW 英文定義並存入 word-cache.json（需設定 MW_API_KEY；已快取的詞自動跳過，可中斷重跑）')
   .option('--prefetch-cefr-zh', '批次將 word-cache.json 的英文定義翻成中文並存入 word-cache-zh.json（需設定 DEEPL_API_KEY；已翻譯的詞自動跳過）')
   .option('--prefetch-phrases', '批次預查片語庫所有片語的 MW 英文定義並存入 phrase-cache.json（需設定 MW_API_KEY；已查過的片語自動跳過，可中斷重跑）')
@@ -102,13 +103,14 @@ program
     updateDict?: boolean;
     fillSentZh?: boolean;
     fillDefZh?: boolean | string;  // true = no layers; string = "domain" or "domain,book"
+    pushCache?: boolean | string;  // true = no layers; string = "domain" or "domain,book"
     prefetchCefr?: boolean;
     prefetchCefrZh?: boolean;
     prefetchPhrases?: boolean;
     cleanPosCache?: boolean;
     cleanZhBase?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
+    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --translate / --translate-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -449,6 +451,35 @@ program
           }
           console.log('');
           console.log(chalk.green(`完成：共存入快取 ${totalSaved} 筆 | 快取已有 ${totalSkipped} 筆 | 補填 CSV ${totalFilled} 筆 | 略過 ${totalNoMatch} 筆`));
+          console.log(chalk.gray(`word-cache-zh.json：${getWordCache().cacheZhSize} 筆`));
+          return;
+        }
+
+        // 強制覆寫快取：CSV → cache（單向，不補填 CSV）
+        if (options.pushCache) {
+          const pushConfig = parseFillDefZhLayers(options.pushCache);
+          const wc = getWordCache();
+          console.log('');
+          console.log(chalk.cyan(`強制覆寫快取（CSV → cache）`));
+          console.log(chalk.gray(`  快取路徑：${wc.cacheZhFilePath}`));
+          if (pushConfig.domain) console.log(chalk.gray(`  domain 快取：domain_${pushConfig.domain}_cache_zh.json`));
+          if (pushConfig.book)   console.log(chalk.gray(`  book 快取：book_${pushConfig.book}_cache_zh.json`));
+          console.log('');
+          let totalPushed  = 0;
+          let totalSkipped = 0;
+          let totalNoMatch = 0;
+          for (const csvPath of beginnerWordsCsvs) {
+            process.stdout.write(chalk.yellow(`正在處理 ${path.basename(csvPath)}...\n`));
+            const result = pushCsvToCache(csvPath, (cur, total) => {
+              process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})   `);
+            }, pushConfig);
+            process.stdout.write(`\r${chalk.green(`  ✓ 覆寫 ${result.pushed} 筆 | 空欄略過 ${result.skipped} 筆 | 無 lemma ${result.noMatch} 筆`)}\n`);
+            totalPushed  += result.pushed;
+            totalSkipped += result.skipped;
+            totalNoMatch += result.noMatch;
+          }
+          console.log('');
+          console.log(chalk.green(`完成：共覆寫 ${totalPushed} 筆 | 空欄略過 ${totalSkipped} 筆 | 無 lemma ${totalNoMatch} 筆`));
           console.log(chalk.gray(`word-cache-zh.json：${getWordCache().cacheZhSize} 筆`));
           return;
         }

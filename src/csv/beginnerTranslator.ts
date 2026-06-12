@@ -962,3 +962,105 @@ export function syncDefinitionCacheWithCsv(
   bookCache?.flush();
   return { savedToCache, skippedCache, filledFromCache, noMatch, outputPath: csvPath };
 }
+
+// ── pushCsvToCache：強制將 CSV 所有值蓋入快取（CSV 優先，不檢查既有值）─────────
+
+export interface PushCacheResult {
+  pushed:  number;  // 至少一欄寫入快取的列數
+  skipped: number;  // 所有翻譯欄皆為空的列數
+  noMatch: number;  // 無 lemma 的列數
+  outputPath: string;
+}
+
+/**
+ * 強制將 beginner words CSV 的 definition_zh / definition_en / word_zh 覆寫入快取。
+ * 僅單向（CSV → cache），不從 cache 補填 CSV。
+ * CEFR 已知詞 → global；UNKNOWN → domain / book（若有設定）。
+ */
+export function pushCsvToCache(
+  csvPath: string,
+  onProgress?: (current: number, total: number) => void,
+  config?: FillDefZhConfig,
+): PushCacheResult {
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = splitLines(content);
+  if (lines.length < 2) {
+    return { pushed: 0, skipped: 0, noMatch: 0, outputPath: csvPath };
+  }
+
+  const headers = parseRow(lines[0]);
+  const idx = Object.fromEntries(headers.map((h, i) => [h, i])) as Record<string, number>;
+  const rows = lines.slice(1).map(l => parseRow(l));
+  const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
+
+  const defZhColIdx    = idx['definition_zh'];
+  const defZhSrcColIdx = idx['definition_zh_source'];
+  const defEnColIdx    = idx['definition_en'];
+  const defEnSrcColIdx = idx['definition_en_source'];
+  const wrdZhColIdx    = idx['word_zh'];
+  const wrdZhSrcColIdx = idx['word_zh_source'];
+
+  if (defZhColIdx === undefined) {
+    return { pushed: 0, skipped: 0, noMatch: rows.length, outputPath: csvPath };
+  }
+
+  const wc = getWordCache();
+  const domainCache = config?.domain ? new DefinitionLayerCache(wc.cacheDir, 'domain', config.domain) : null;
+  const bookCache   = config?.book   ? new DefinitionLayerCache(wc.cacheDir, 'book',   config.book)   : null;
+
+  let pushed  = 0;
+  let skipped = 0;
+  let noMatch = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const lemma     = get(rows[i], 'lemma').trim();
+    const pos       = get(rows[i], 'pos').trim() || null;
+    const defZh     = get(rows[i], 'definition_zh').trim();
+    const defZhSrc  = defZhSrcColIdx !== undefined ? get(rows[i], 'definition_zh_source').trim() : '';
+    const defEn     = defEnColIdx    !== undefined ? get(rows[i], 'definition_en').trim()        : '';
+    const defEnSrc  = defEnSrcColIdx !== undefined ? get(rows[i], 'definition_en_source').trim() : '';
+    const wordZhVal = wrdZhColIdx    !== undefined ? get(rows[i], 'word_zh').trim()              : '';
+    const wordZhSrc = wrdZhSrcColIdx !== undefined ? get(rows[i], 'word_zh_source').trim()       : '';
+    const cefrLevel = get(rows[i], 'cefr_level').trim();
+
+    if (!lemma) { noMatch++; onProgress?.(i + 1, rows.length); continue; }
+
+    const cefrKnown = cefrLevel && cefrLevel !== 'UNKNOWN';
+    let wrote = false;
+
+    if (defZh) {
+      const zhSrc = defZhSrc || 'csv';
+      if (cefrKnown) {
+        wc.setChinese(lemma, pos, defZh, zhSrc);
+        wrote = true;
+      } else {
+        if (bookCache)   { bookCache.set(lemma, pos, defZh, zhSrc);   wrote = true; }
+        if (domainCache) { domainCache.set(lemma, pos, defZh, zhSrc); wrote = true; }
+      }
+    }
+
+    if (defEn && defEnColIdx !== undefined) {
+      const enSrc = defEnSrc || 'csv';
+      if (cefrKnown) {
+        wc.setCache(lemma, pos, defEn, enSrc);
+        wrote = true;
+      } else {
+        if (bookCache)   { bookCache.setEn(lemma, pos, defEn, enSrc);   wrote = true; }
+        if (domainCache) { domainCache.setEn(lemma, pos, defEn, enSrc); wrote = true; }
+      }
+    }
+
+    if (wordZhVal && wrdZhColIdx !== undefined) {
+      wc.setWordZh(lemma, pos, wordZhVal, wordZhSrc || 'csv');
+      wrote = true;
+    }
+
+    if (wrote) pushed++; else skipped++;
+    onProgress?.(i + 1, rows.length);
+  }
+
+  wc.flush();
+  domainCache?.flush();
+  bookCache?.flush();
+  return { pushed, skipped, noMatch, outputPath: csvPath };
+}
