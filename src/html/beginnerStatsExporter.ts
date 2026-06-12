@@ -28,48 +28,44 @@ function sentCell(s: string): string {
   return s ? `<span class="sent">${esc(s)}</span>` : '<span class="empty">—</span>';
 }
 
-const MISSING_CSV_HEADERS = [
-  'lemma', 'pos', 'cefr_level', 'coverage_rank', 'global_frequency',
-  'definition_en', 'definition_en_source',
-  'context_sentence', 'context_sentence_zh', 'context_sentence_zh_source',
-  'definition_zh', 'definition_zh_source',
-  'source_file',
-];
-
-function escCsv(v: string): string {
-  return `"${v.replace(/"/g, '""')}"`;
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
 }
 
-function wordStatToCsvRow(w: WordStat): string {
-  return [
-    w.lemma, w.pos, w.cefr, String(w.rank), String(w.frequency),
-    w.definition_en, w.definition_en_source,
-    w.context_sentence, w.context_sentence_zh, w.context_sentence_zh_source,
-    w.definition_zh, w.definition_zh_source,
-    w.sourceFile,
-  ].map(escCsv).join(',');
+function exportMissingJson(words: WordStat[], outputPath: string): void {
+  const missing = words.filter(w => !w.definition_en || !w.definition_zh || !w.word_zh);
+  const missingEnCount   = missing.filter(w => !w.definition_en).length;
+  const missingZhCount   = missing.filter(w => !w.definition_zh).length;
+  const missingWordZhCount = missing.filter(w => !w.word_zh).length;
+  const payload = {
+    generated: new Date().toISOString(),
+    missing_en_count: missingEnCount,
+    missing_zh_count: missingZhCount,
+    missing_word_zh_count: missingWordZhCount,
+    words: missing.map(w => {
+      const m: string[] = [];
+      if (!w.definition_en) m.push('en');
+      if (!w.definition_zh) m.push('zh');
+      if (!w.word_zh)       m.push('word_zh');
+      return { word: w.lemma, missing: m, definition_en: w.definition_en, definition_zh: w.definition_zh, word_zh: w.word_zh };
+    }),
+  };
+  fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
-function exportMissingCsv(words: WordStat[], basePath: string, splitSize?: number): string[] {
-  if (!splitSize || splitSize <= 0 || words.length === 0) {
-    const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...words.map(wordStatToCsvRow)];
-    fs.writeFileSync(basePath, lines.join('\n'), 'utf-8');
-    return [basePath];
+function exportMissingSentenceJson(words: WordStat[], outputPath: string): void {
+  const result: Record<string, { en: string; zh: string; source: string }> = {};
+  for (const w of words) {
+    if (!w.context_sentence_zh && w.context_sentence) {
+      result[fnv1a(w.context_sentence)] = { en: w.context_sentence, zh: '', source: '' };
+    }
   }
-  const total = Math.ceil(words.length / splitSize);
-  const pad = String(total).length < 2 ? 2 : String(total).length;
-  const ext = path.extname(basePath);
-  const base = basePath.slice(0, -ext.length);
-  const paths: string[] = [];
-  for (let i = 0; i < words.length; i += splitSize) {
-    const chunk = words.slice(i, i + splitSize);
-    const partNum = String(Math.floor(i / splitSize) + 1).padStart(pad, '0');
-    const filePath = `${base}-part-${partNum}${ext}`;
-    const lines = [MISSING_CSV_HEADERS.map(escCsv).join(','), ...chunk.map(wordStatToCsvRow)];
-    fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
-    paths.push(filePath);
-  }
-  return paths;
+  fs.writeFileSync(outputPath, JSON.stringify(result, null, 2), 'utf-8');
 }
 
 function buildPerFileMissingTable(words: WordStat[]): string {
@@ -174,16 +170,14 @@ function missingSection(opts: {
 
 export interface BeginnerStatsExportResult {
   htmlPath: string;
-  missingDefZhPaths: string[];
-  missingCtxZhPaths: string[];
-  missingDefEnPaths: string[];
+  missingJsonPath: string | null;
+  missingSentenceJsonPath: string | null;
 }
 
 export function exportBeginnerStatsToHtml(
   stats: BeginnerWordStats,
   deckName: string,
   outputDir: string,
-  options?: { splitSize?: number },
 ): BeginnerStatsExportResult {
   const translatedPct  = stats.total > 0 ? Math.round(stats.translated / stats.total * 100) : 0;
   const missingDefZh   = stats.total - stats.translated;
@@ -572,16 +566,21 @@ tr:hover td{background:#f8fafc}
   const slug = deckName.replace(/[^a-z0-9一-鿿]+/gi, '-').replace(/^-|-$/g, '');
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const htmlPath        = path.join(outputDir, `${slug}-beginner-stats.html`);
-  const missingDefZhBase = path.join(outputDir, `${slug}-missing-def-zh.csv`);
-  const missingCtxZhBase = path.join(outputDir, `${slug}-missing-ctx-zh.csv`);
-  const missingDefEnBase = path.join(outputDir, `${slug}-missing-def-en.csv`);
+  const htmlPath             = path.join(outputDir, `${slug}-beginner-stats.html`);
+  const missingJsonPath      = path.join(outputDir, `${slug}-missing.json`);
+  const missingSentenceJsonPath = path.join(outputDir, `${slug}-missing-sentence.json`);
 
-  const splitSize = options?.splitSize;
   fs.writeFileSync(htmlPath, html, 'utf-8');
-  const missingDefZhPaths = exportMissingCsv(stats.words.filter(w => !w.definition_zh),      missingDefZhBase, splitSize);
-  const missingCtxZhPaths = exportMissingCsv(stats.words.filter(w => !w.context_sentence_zh), missingCtxZhBase, splitSize);
-  const missingDefEnPaths = exportMissingCsv(stats.words.filter(w => !w.definition_en),       missingDefEnBase, splitSize);
 
-  return { htmlPath, missingDefZhPaths, missingCtxZhPaths, missingDefEnPaths };
+  const hasMissing   = stats.words.some(w => !w.definition_en || !w.definition_zh || !w.word_zh);
+  const hasMissingSent = stats.words.some(w => !w.context_sentence_zh && w.context_sentence);
+
+  if (hasMissing)   exportMissingJson(stats.words, missingJsonPath);
+  if (hasMissingSent) exportMissingSentenceJson(stats.words, missingSentenceJsonPath);
+
+  return {
+    htmlPath,
+    missingJsonPath:         hasMissing     ? missingJsonPath      : null,
+    missingSentenceJsonPath: hasMissingSent ? missingSentenceJsonPath : null,
+  };
 }

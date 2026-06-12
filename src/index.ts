@@ -70,7 +70,6 @@ program
   .option('--beginner-min-freq <次數>', '詞彙最低出現次數門檻（預設：2）', '2')
   .option('--beginner-include-a1', '包含 A1 基礎詞彙（預設：排除）')
   .option('--beginner-split <數量>', '將翻譯 CSV 分割為每 N 個詞彙一個檔案')
-  .option('--missing-split <數量>', '將缺漏 CSV 每 N 筆分割為一個檔案')
   .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
   .option('--fill-sent-zh', '雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填')
@@ -99,7 +98,6 @@ program
     beginnerMinFreq?: string;
     beginnerIncludeA1?: boolean;
     beginnerSplit?: string;
-    missingSplit?: string;
     mw?: boolean;
     updateDict?: boolean;
     fillSentZh?: boolean;
@@ -563,8 +561,7 @@ program
 
         // 字彙統計（預先計算，顯示移至回填後）
         const bwStats = computeBeginnerWordStats(beginnerWordsCsvs);
-        const missingSplitSize = options.missingSplit ? parseInt(options.missingSplit, 10) : undefined;
-        const statsResult = exportBeginnerStatsToHtml(bwStats, deckName, options.output, missingSplitSize ? { splitSize: missingSplitSize } : undefined);
+        const statsResult = exportBeginnerStatsToHtml(bwStats, deckName, options.output);
 
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
 
@@ -593,12 +590,10 @@ program
           console.log(`覆蓋率排名：#${bwStats.rankMin} – #${bwStats.rankMax}`);
         }
         console.log(chalk.green(`✓ 字彙統計 HTML：${statsResult.htmlPath}`));
-        if (bwStats.total - bwStats.translated > 0)
-          statsResult.missingDefZhPaths.forEach(p => console.log(chalk.gray(`  缺中文翻譯：  ${p}`)));
-        if (bwStats.missingContextZh > 0)
-          statsResult.missingCtxZhPaths.forEach(p => console.log(chalk.gray(`  缺例句中文：  ${p}`)));
-        if (bwStats.missingDefEn > 0)
-          statsResult.missingDefEnPaths.forEach(p => console.log(chalk.gray(`  缺英文解釋：  ${p}`)));
+        if (statsResult.missingJsonPath)
+          console.log(chalk.gray(`  缺翻譯清單：  ${statsResult.missingJsonPath}`));
+        if (statsResult.missingSentenceJsonPath)
+          console.log(chalk.gray(`  缺例句翻譯：  ${statsResult.missingSentenceJsonPath}`));
 
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));

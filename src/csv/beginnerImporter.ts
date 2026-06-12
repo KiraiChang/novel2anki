@@ -173,6 +173,9 @@ export interface WordStat {
   context_sentence: string;
   context_sentence_zh: string;
   context_sentence_zh_source: string;
+  word_zh: string;
+  word_zh_source: string;
+  sourcePath: string;
   sourceFile: string;
 }
 
@@ -223,6 +226,8 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
       const ctx_sent    = get('context_sentence').trim();
       const ctx_zh      = get('context_sentence_zh').trim();
       const ctx_zh_src  = get('context_sentence_zh_source').trim();
+      const word_zh     = get('word_zh').trim();
+      const word_zh_src = get('word_zh_source').trim();
       if (def_zh) translated++;
       if (!def_en) missingDefEn++;
       if (!ctx_zh) missingContextZh++;
@@ -241,7 +246,8 @@ export function computeBeginnerWordStats(csvPaths: string[]): BeginnerWordStats 
         definition_en: def_en, definition_en_source: def_en_src,
         context_sentence: ctx_sent,
         context_sentence_zh: ctx_zh, context_sentence_zh_source: ctx_zh_src,
-        sourceFile,
+        word_zh, word_zh_source: word_zh_src,
+        sourcePath: csvPath, sourceFile,
       });
     }
   }
