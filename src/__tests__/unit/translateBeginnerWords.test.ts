@@ -16,6 +16,8 @@ const mockWc = {
   get: jest.fn(),
   setCache: jest.fn(),
   setSentenceZh: jest.fn(),
+  getWordZh: jest.fn().mockReturnValue(null),
+  getWordZhSource: jest.fn().mockReturnValue(null),
   setWordZhIfEmpty: jest.fn().mockReturnValue(true),
   flush: jest.fn(),
 };
@@ -78,6 +80,9 @@ beforeEach(() => {
   (protectNames as jest.Mock).mockImplementation((s: string) => ({ text: s, restoreMap: [] }));
   (restoreNames as jest.Mock).mockImplementation((s: string) => s);
   mockWc.get.mockReturnValue(null);
+  mockWc.getWordZh.mockReturnValue(null);
+  mockWc.getWordZhSource.mockReturnValue(null);
+  mockWc.setWordZhIfEmpty.mockReturnValue(true);
 });
 
 afterEach(() => {

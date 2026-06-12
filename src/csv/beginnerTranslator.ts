@@ -464,14 +464,25 @@ export async function translateBeginnerWordsCsv(
     }
   }
 
-  // Phase 2.5 準備：蒐集 word_zh 尚空的列（在 Phase 2 前準備，讓 batchTranslate 可並行）
+  // Phase 2.5 準備：分兩組——快取命中直接用，快取未中才批次送翻譯 API
+  const wc              = getWordCache();
   const wordZhColIdx    = (idx as Record<string, number>)['word_zh'];
   const wordZhSrcColIdx = (idx as Record<string, number>)['word_zh_source'];
-  const wordZhBatch: Array<{ j: number; lemma: string }> = [];
+  const wordZhFromCache: Array<{ j: number; zh: string; src: string }> = [];
+  const wordZhBatch:     Array<{ j: number; lemma: string }>            = [];
   for (let j = 0; j < needTranslation.length; j++) {
     const { cols } = needTranslation[j];
     if (options?.force || !get(cols, 'word_zh').trim()) {
-      wordZhBatch.push({ j, lemma: lemmas[j] });
+      const lemma = lemmas[j];
+      const pos   = posList[j] || null;
+      if (!options?.force) {
+        const cached = wc.getWordZh(lemma, pos);
+        if (cached) {
+          wordZhFromCache.push({ j, zh: cached, src: wc.getWordZhSource(lemma, pos) || 'cache' });
+          continue;
+        }
+      }
+      wordZhBatch.push({ j, lemma });
     }
   }
 
@@ -556,14 +567,24 @@ export async function translateBeginnerWordsCsv(
     }
   });
 
-  // word_zh 寫回 CSV + 存入 cache（setWordZhIfEmpty：已有則略過）
-  const wc = getWordCache();
+  // word_zh 寫回 CSV（快取命中）
+  for (const { j, zh, src } of wordZhFromCache) {
+    const { i } = needTranslation[j];
+    if (wordZhColIdx !== undefined && (options?.force || !rows[i][wordZhColIdx]?.trim())) {
+      while (rows[i].length <= Math.max(wordZhColIdx, wordZhSrcColIdx ?? 0)) rows[i].push('');
+      rows[i][wordZhColIdx] = zh;
+      if (wordZhSrcColIdx !== undefined) rows[i][wordZhSrcColIdx] = src;
+    }
+  }
+
+  // word_zh 寫回 CSV + 存入 cache（API 翻譯結果；setWordZhIfEmpty：已有則略過）
   for (let bIdx = 0; bIdx < wordZhBatch.length; bIdx++) {
     const { j } = wordZhBatch[bIdx];
     const { i, cols } = needTranslation[j];
     const wordZh = wordZhTranslated[bIdx] ?? '';
     if (!wordZh) continue;
     if (wordZhColIdx !== undefined && (options?.force || !rows[i][wordZhColIdx]?.trim())) {
+      while (rows[i].length <= Math.max(wordZhColIdx, wordZhSrcColIdx ?? 0)) rows[i].push('');
       rows[i][wordZhColIdx] = wordZh;
       if (wordZhSrcColIdx !== undefined) rows[i][wordZhSrcColIdx] = provider;
     }

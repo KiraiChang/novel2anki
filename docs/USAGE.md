@@ -50,7 +50,7 @@ npx ts-node src/index.ts <輸入> [選項]
   --mw                    MW 預查：預先查詢英文定義寫入 CSV 的 definition_en 欄（需設定 MW_API_KEY）
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
-  --prefetch-cefr-zh      批次翻譯 word-cache.json 的英文定義為繁體中文，存入 word-cache-zh.json
+  --prefetch-cefr-zh      批次翻譯 CEFR 字庫：英文定義（definition_zh）+ 單字直翻（word_zh），存入 word-cache-zh.json
   --prefetch-phrases      批次預查片語庫（1409 個片語）MW 英文定義，存入 phrase-cache.json（需設定 MW_API_KEY；命中與查無結果均快取）
   --fill-sent-zh          雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填
   --fill-def-zh [layers]  雙向同步詞彙定義（definition_zh 與 definition_en）。layers 格式：domain 或 domain,book
@@ -432,7 +432,11 @@ npx ts-node src/index.ts --prefetch-cefr-zh
 TRANSLATE_PROVIDER=azure npx ts-node src/index.ts --prefetch-cefr-zh
 ```
 
-Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬字元，一次可跑完。
+此指令執行兩批翻譯：
+1. **定義翻譯**：讀取 `word-cache.json` 的英文定義，翻譯後存入 `word-cache-zh.json`（`definition_zh` / `zh` 欄位）
+2. **單字直翻**：對每個缺少 `word_zh` 的 CEFR 詞直接翻譯 lemma 本身（如 `bridge` → `橋樑`），存入 `word-cache-zh.json`（`word_zh` 欄位）；**即使該詞尚無英文定義也會翻譯 `word_zh`**
+
+Azure 免費額度 2,000,000 字/月，5782 詞兩批合計約 46 萬字元，一次可跑完。
 
 ### 快取檔位置
 
@@ -443,7 +447,7 @@ Azure 免費額度 2,000,000 字/月，5782 詞 × 平均 40 字元 ≈ 23 萬�
 |------|------|---------|
 | `word-dict.json` | 個人精選英文定義（不自動覆寫） | `--update-dict` 手動升級 |
 | `word-cache.json` | MW 自動查詢快取（英文定義） | `--prefetch-cefr` 或 `--mw` |
-| `word-cache-zh.json` | 翻譯後的繁體中文定義（CEFR 已知詞） | `--prefetch-cefr-zh` 或 `--fill-def-zh` |
+| `word-cache-zh.json` | 翻譯後的繁體中文定義（`definition_zh`）與單字直翻（`word_zh`）（CEFR 已知詞） | `--prefetch-cefr-zh` 或 `--fill-def-zh` |
 | `domain_{name}_cache_zh.json` | domain 專屬中文定義快取（含 UNKNOWN 詞，`{zh, source}`） | `--fill-def-zh=domain` 寫回時建立 |
 | `domain_{name}_cache.json` | domain 專屬英文定義快取（含 UNKNOWN 詞，`{def, source}`） | `--fill-def-zh=domain` 寫回時建立（en cache） |
 | `book_{name}_cache_zh.json` | book 專屬中文定義快取（含 UNKNOWN 詞，`{zh, source}`） | `--fill-def-zh=domain,book` 寫回時建立 |

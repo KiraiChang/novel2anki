@@ -285,6 +285,28 @@ export async function prefetchCefrZhToWordCache(
     if (zh) wc.setChinese(word, null, zh, `${provider}:derived`);
   }
 
+  // ── word_zh（單字直翻）批次 ──────────────────────────────────────────────────
+  // 獨立於定義翻譯批次，對每個 CEFR 詞直接翻譯 lemma 本身（如 "bridge" → "橋樑"）
+  const wordZhPending: Array<{ word: string }> = [];
+  for (const word of cefrWords) {
+    if (!wc.getWordZh(word, null)) wordZhPending.push({ word });
+  }
+  for (let b = 0; b < wordZhPending.length; b += DEEPL_BATCH) {
+    if (b > 0) await sleep(INTER_BATCH_DELAY_MS);
+    const chunk = wordZhPending.slice(b, b + DEEPL_BATCH);
+    try {
+      const translated = await batchTranslate(chunk.map(c => c.word), deeplConfig);
+      for (let j = 0; j < chunk.length; j++) {
+        const zh = translated[j] ?? '';
+        if (zh) wc.setWordZhIfEmpty(chunk[j].word, null, zh, provider);
+      }
+    } catch (e) {
+      const msg = (e as Error).message;
+      process.stderr.write(`\n[prefetch-cefr-zh] word_zh 批次翻譯錯誤：${msg}\n`);
+      if (msg.includes('429')) break;
+    }
+  }
+
   wc.flush();
   return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount };
 }

@@ -20,6 +20,8 @@ const mockCache = {
   getPhrase:                jest.fn(),
   setPhrase:                jest.fn(),
   hasPhrase:                jest.fn(),
+  getWordZh:                jest.fn().mockReturnValue(null),
+  setWordZhIfEmpty:         jest.fn().mockReturnValue(true),
   cacheSize:                0,
 };
 
@@ -40,6 +42,7 @@ beforeEach(() => {
   mockCache.hasPosCache.mockReturnValue(false);            // 預設：無 POS-specific cache 條目
   mockCache.getAllCacheEntriesForWord.mockReturnValue([]);  // 預設：無英文條目
   mockCache.hasPhrase.mockReturnValue(false);              // 預設：片語尚未查過
+  mockCache.getWordZh.mockReturnValue(null);               // 預設：word_zh cache miss
   delete process.env.MW_API_KEY;
   global.fetch = jest.fn();
 });
@@ -342,9 +345,10 @@ describe('prefetchCefrToWordCache — flush and counts', () => {
 
 describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
   it('should skip word and increment skippedCount when all POS entries are already cached', async () => {
-    // Given: run 有 verb 條目，且 verb + default 都已翻譯
+    // Given: run 有 verb 條目，且 verb + default 都已翻譯；word_zh 也已快取（避免觸發 word_zh 批次）
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
     mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue('跑步');
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
     // Then
@@ -354,9 +358,10 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
   });
 
   it('should report source=cached in progress callback when all POS entries are already cached', async () => {
-    // Given
+    // Given: word_zh 也已快取
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run fast' }]);
     mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue('跑步');
     const sources: string[] = [];
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, (_, __, meta) => sources.push(meta.source), ['run']);
@@ -366,9 +371,10 @@ describe('prefetchCefrZhToWordCache — Chinese cache hit', () => {
 });
 
 describe('prefetchCefrZhToWordCache — no English definition', () => {
-  it('should increment noEnCount and skip translation when no English entries in cache', async () => {
-    // Given: getAllCacheEntriesForWord 回傳空陣列（無英文定義）
+  it('should increment noEnCount and skip definition translation when no English entries in cache', async () => {
+    // Given: 無英文定義（定義翻譯跳過），但 word_zh 已快取（避免干擾此測試主旨）
     mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
+    mockCache.getWordZh.mockReturnValue('已快取');
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
     // Then
@@ -571,12 +577,13 @@ describe('prefetchCefrZhToWordCache — POS-specific translation', () => {
 
 describe('prefetchCefrZhToWordCache — legacy base zh copy', () => {
   it('should copy existing base zh to missing POS keys without calling translation API', async () => {
-    // Given: chapter 的 noun POS 尚未快取，但 base（no-POS）已有舊格式翻譯
+    // Given: chapter 的 noun POS 尚未快取，但 base（no-POS）已有舊格式翻譯；word_zh 也已快取
     mockCache.getAllCacheEntriesForWord.mockReturnValue([
       { pos: 'noun', def: '(noun) one of the main sections of a book' },
     ]);
     mockCache.hasChinese.mockImplementation((_: string, pos: string | null) => pos === null);
     mockCache.getChinese.mockReturnValue('（名詞）書籍的主要部分之一');
+    mockCache.getWordZh.mockReturnValue('章節');
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['chapter']);
     // Then: 直接複製，不呼叫翻譯 API
@@ -587,13 +594,14 @@ describe('prefetchCefrZhToWordCache — legacy base zh copy', () => {
   });
 
   it('should copy base zh to ALL missing POS keys when multiple are absent', async () => {
-    // Given: cross 有 noun + verb，只有 base 翻譯（舊格式）
+    // Given: cross 有 noun + verb，只有 base 翻譯（舊格式）；word_zh 也已快取
     mockCache.getAllCacheEntriesForWord.mockReturnValue([
       { pos: 'noun', def: '(noun) a cross' },
       { pos: 'verb', def: '(verb) to cross' },
     ]);
     mockCache.hasChinese.mockImplementation((_: string, pos: string | null) => pos === null);
     mockCache.getChinese.mockReturnValue('（名詞）十字形狀');
+    mockCache.getWordZh.mockReturnValue('十字');
     // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['cross']);
     // Then: noun 和 verb 都複製自 base
@@ -807,8 +815,9 @@ describe('prefetchPhrasesToCache — flush and counts', () => {
 
 describe('prefetchCefrZhToWordCache — Azure 429 break', () => {
   it('should stop remaining batches when translation throws 429 and call flush once', async () => {
-    // Given: 3 words → 1 batch；batchTranslate 拋出 429
+    // Given: 3 words → 1 def batch；batchTranslate 拋出 429（word_zh 已快取，不觸發第二批）
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run' }]);
+    mockCache.getWordZh.mockReturnValue('已快取');
     (batchTranslate as jest.Mock).mockRejectedValue(new Error('Azure Translator HTTP 429'));
     // When
     const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
@@ -819,20 +828,94 @@ describe('prefetchCefrZhToWordCache — Azure 429 break', () => {
   });
 
   it('should continue processing next batch when error is NOT 429', async () => {
-    // Given: 3 words → 1 batch；拋出非 429 錯誤
+    // Given: 4 words → 1 def batch（非 429 錯誤）+ 1 word_zh batch（成功）
+    // 只消費剛好 2 個 Once 回應（def 1 個 + word_zh 1 個），避免殘留污染後續測試
+    const words = [...TEST_WORDS, 'extra'];  // 4 words
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'verb', def: '(verb) to run' }]);
     (batchTranslate as jest.Mock)
-      .mockRejectedValueOnce(new Error('DeepL quota exceeded'))
-      .mockResolvedValueOnce(['熊', '去']);
-    // When: 只有 1 批（3 詞），但第一批失敗後仍只有 1 批（不會再觸發第二批）
-    // 改用 2 batch 情境：first throws non-429, second succeeds
-    const words = [...TEST_WORDS, 'extra'];  // 4 words still 1 batch
-    (batchTranslate as jest.Mock)
-      .mockRejectedValueOnce(new Error('network error'))
-      .mockResolvedValueOnce(['翻譯']);
+      .mockRejectedValueOnce(new Error('DeepL quota exceeded'))  // def batch 失敗（非 429）
+      .mockResolvedValueOnce(['熊', '去', '去', '翻譯']);         // word_zh batch 成功
+    // When
     await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, words);
-    // 由於 TEST_WORDS+extra 只有 4 詞 → 1 batch，非 429 → 不 break，但只有 1 batch
-    // 正確的 assert 是：非 429 時不 break（batchTranslate 僅被呼叫 1 次因為只有 1 批）
+    // Then: 非 429 → 繼續執行 word_zh 批次；flush 仍寫盤
+    expect(mockCache.flush).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── prefetchCefrZhToWordCache — word_zh 單字直翻 ─────────────────────────────
+
+describe('prefetchCefrZhToWordCache — word_zh translation', () => {
+  it('should call batchTranslate with bare lemma for word_zh when not cached', async () => {
+    // Given: 定義已快取（跳過定義翻譯），但 word_zh 未快取
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) to sprint' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then: 以 lemma 本身呼叫翻譯
+    expect(batchTranslate).toHaveBeenCalledWith(['run'], DEEPL_CONFIG);
+  });
+
+  it('should store word_zh via setWordZhIfEmpty with provider source', async () => {
+    // Given
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) to sprint' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then
+    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('run', null, '跑', 'deepl');
+  });
+
+  it('should skip word_zh translation when already cached in word-cache-zh.json', async () => {
+    // Given: word_zh 已有快取值
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) to sprint' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue('奔跑');
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then: 不呼叫翻譯 API，不寫入快取
+    expect(batchTranslate).not.toHaveBeenCalled();
+    expect(mockCache.setWordZhIfEmpty).not.toHaveBeenCalled();
+  });
+
+  it('should translate word_zh even when no English definition exists', async () => {
+    // Given: 無英文定義（定義翻譯跳過），但 word_zh 未快取，仍需直翻 lemma
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then: 定義翻譯跳過（noEnCount=1），但 word_zh 仍被翻譯
+    expect(result.noEnCount).toBe(1);
+    expect(batchTranslate).toHaveBeenCalledWith(['run'], DEEPL_CONFIG);
+    expect(mockCache.setWordZhIfEmpty).toHaveBeenCalledWith('run', null, '跑', 'deepl');
+  });
+
+  it('should NOT store word_zh when batchTranslate returns empty string', async () => {
+    // Given
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['']);
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, ['run']);
+    // Then: 空字串不寫入
+    expect(mockCache.setWordZhIfEmpty).not.toHaveBeenCalled();
+  });
+
+  it('should stop word_zh batches when translation throws 429', async () => {
+    // Given: 51 words → 2 word_zh batches；第一批 429 → 停止
+    const words = Array.from({ length: 51 }, (_, i) => `word${i}`);
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.hasChinese.mockReturnValue(true);   // 定義已快取，跳過定義翻譯
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockRejectedValue(new Error('DeepL HTTP 429'));
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, words);
+    // Then: 只呼叫一次 batchTranslate（第一批 429 → break）
+    expect(batchTranslate).toHaveBeenCalledTimes(1);
     expect(mockCache.flush).toHaveBeenCalledTimes(1);
   });
 });
