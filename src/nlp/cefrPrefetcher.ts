@@ -143,15 +143,17 @@ export async function prefetchCefrToWordCache(
 
 export interface PrefetchZhProgress {
   word: string;
-  source: 'cached' | 'deepl' | 'no-en' | 'error';
+  source: 'cached' | 'deepl' | 'no-en' | 'error' | 'word_zh' | 'word_zh:error';
 }
 
 export interface PrefetchZhResult {
-  totalCount:   number;
-  fetchedCount: number;
-  skippedCount: number;
-  noEnCount:    number;
-  failedCount:  number;
+  totalCount:        number;
+  fetchedCount:      number;
+  skippedCount:      number;
+  noEnCount:         number;
+  failedCount:       number;
+  wordZhFetched:     number;
+  wordZhPendingCount: number;
 }
 
 const DEEPL_BATCH = 50;
@@ -287,28 +289,45 @@ export async function prefetchCefrZhToWordCache(
 
   // ── word_zh（單字直翻）批次 ──────────────────────────────────────────────────
   // 獨立於定義翻譯批次，對每個 CEFR 詞直接翻譯 lemma 本身（如 "bridge" → "橋樑"）
-  const wordZhPending: Array<{ word: string }> = [];
+  const wordZhMissing: Array<{ word: string }> = [];
   for (const word of cefrWords) {
-    if (!wc.getWordZh(word, null)) wordZhPending.push({ word });
+    if (!wc.getWordZh(word, null)) wordZhMissing.push({ word });
   }
-  for (let b = 0; b < wordZhPending.length; b += DEEPL_BATCH) {
+
+  // 哨兵：通知 CLI word_zh 批次的待翻數量（done=0）
+  if (wordZhMissing.length > 0) {
+    onProgress?.(0, wordZhMissing.length, { word: '', source: 'word_zh' });
+  }
+
+  let wordZhFetched = 0;
+  let wordZhDone    = 0;
+  for (let b = 0; b < wordZhMissing.length; b += DEEPL_BATCH) {
     if (b > 0) await sleep(INTER_BATCH_DELAY_MS);
-    const chunk = wordZhPending.slice(b, b + DEEPL_BATCH);
+    const chunk = wordZhMissing.slice(b, b + DEEPL_BATCH);
     try {
       const translated = await batchTranslate(chunk.map(c => c.word), deeplConfig);
       for (let j = 0; j < chunk.length; j++) {
         const zh = translated[j] ?? '';
-        if (zh) wc.setWordZhIfEmpty(chunk[j].word, null, zh, provider);
+        wordZhDone++;
+        if (zh) {
+          wc.setWordZhIfEmpty(chunk[j].word, null, zh, provider);
+          wordZhFetched++;
+        }
+        onProgress?.(wordZhDone, wordZhMissing.length, { word: chunk[j].word, source: 'word_zh' });
       }
     } catch (e) {
       const msg = (e as Error).message;
       process.stderr.write(`\n[prefetch-cefr-zh] word_zh 批次翻譯錯誤：${msg}\n`);
+      for (const { word } of chunk) {
+        wordZhDone++;
+        onProgress?.(wordZhDone, wordZhMissing.length, { word, source: 'word_zh:error' });
+      }
       if (msg.includes('429')) break;
     }
   }
 
   wc.flush();
-  return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount };
+  return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount, wordZhFetched, wordZhPendingCount: wordZhMissing.length };
 }
 
 // ── 片語庫 MW 預查 ─────────────────────────────────────────────────────────────

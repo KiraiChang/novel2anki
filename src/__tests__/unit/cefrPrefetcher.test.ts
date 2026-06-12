@@ -436,9 +436,10 @@ describe('prefetchCefrZhToWordCache — inter-batch delay', () => {
   afterEach(() => { jest.useRealTimers(); });
 
   it('should insert 500ms delay between batches when processing more than one batch', async () => {
-    // Given: 51 words × 1 POS each → 51 pending items → 2 batches (50 + 1)
+    // Given: 51 words × 1 POS each → 51 pending items → 2 batches (50 + 1)；word_zh 已快取不觸發第二批次
     const words = Array.from({ length: 51 }, (_, i) => `word${i}`);
     mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test definition text' }]);
+    mockCache.getWordZh.mockReturnValue('已快取');  // 避免 word_zh 批次用盡 Once mock 後 crash
     (batchTranslate as jest.Mock)
       .mockResolvedValueOnce(Array(50).fill('翻譯'))
       .mockResolvedValueOnce(['翻譯']);
@@ -917,5 +918,55 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     // Then: 只呼叫一次 batchTranslate（第一批 429 → break）
     expect(batchTranslate).toHaveBeenCalledTimes(1);
     expect(mockCache.flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('should fire sentinel progress (done=0, source=word_zh) before batch starts', async () => {
+    // Given: 定義已快取，word_zh 未快取
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑']);
+    const progressCalls: Array<{ done: number; total: number; source: string; word: string }> = [];
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (done, total, meta) => {
+      progressCalls.push({ done, total, source: meta.source, word: meta.word });
+    }, ['run']);
+    // Then: 第一筆 word_zh 進度為哨兵（done=0, word='', total=1）
+    const sentinel = progressCalls.find(p => p.source === 'word_zh' && p.done === 0);
+    expect(sentinel).toEqual({ done: 0, total: 1, source: 'word_zh', word: '' });
+  });
+
+  it('should fire per-word progress after translating each word in word_zh batch', async () => {
+    // Given
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑', '熊', '去']);
+    const wordZhProgress: Array<{ done: number; word: string }> = [];
+    // When
+    await prefetchCefrZhToWordCache(DEEPL_CONFIG, (done, _, meta) => {
+      if (done > 0 && (meta.source === 'word_zh' || meta.source === 'word_zh:error')) {
+        wordZhProgress.push({ done, word: meta.word });
+      }
+    }, TEST_WORDS);
+    // Then: 每個詞依序回報進度（done 遞增，word 為 lemma）
+    expect(wordZhProgress).toEqual([
+      { done: 1, word: 'run' },
+      { done: 2, word: 'bear' },
+      { done: 3, word: 'go' },
+    ]);
+  });
+
+  it('should return wordZhFetched and wordZhPendingCount in result', async () => {
+    // Given: run 已有 word_zh 快取，bear 和 go 沒有
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockImplementation((word: string) => word === 'run' ? '跑步' : null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['熊', '去']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: 2 詞待翻，2 詞成功翻譯
+    expect(result.wordZhPendingCount).toBe(2);
+    expect(result.wordZhFetched).toBe(2);
   });
 });

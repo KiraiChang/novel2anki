@@ -235,18 +235,39 @@ program
       }
       console.log('');
 
+      let wordZhPhaseStarted = false;
       const result = await prefetchCefrZhToWordCache(deeplCfg, (done, total, meta) => {
-        const pct = String(Math.round(done / total * 100)).padStart(3);
-        const sourceTag =
-          meta.source === 'deepl'  ? chalk.blue(`[${providerLabel}]`) :
-          meta.source === 'cached' ? chalk.green('[快取]') :
-          meta.source === 'no-en'  ? chalk.gray('[無英文]') :
-                                     chalk.red('[錯誤]');
-        process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
+        if (meta.source === 'word_zh' || meta.source === 'word_zh:error') {
+          if (done === 0) {
+            // 哨兵：word_zh 批次開始，顯示待翻數量
+            process.stdout.write('\n\n');
+            console.log(chalk.cyan(`word_zh 單字直翻`));
+            console.log(chalk.gray(`待翻譯：${total} 詞（尚未翻譯直接對應中文的 CEFR 詞）`));
+            console.log('');
+            wordZhPhaseStarted = true;
+            return;
+          }
+          const pct = String(Math.round(done / total * 100)).padStart(3);
+          const sourceTag = meta.source === 'word_zh:error' ? chalk.red('[錯誤]') : chalk.blue(`[${providerLabel}]`);
+          process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
+        } else {
+          const pct = String(Math.round(done / total * 100)).padStart(3);
+          const sourceTag =
+            meta.source === 'deepl'  ? chalk.blue(`[${providerLabel}]`) :
+            meta.source === 'cached' ? chalk.green('[快取]') :
+            meta.source === 'no-en'  ? chalk.gray('[無英文]') :
+                                       chalk.red('[錯誤]');
+          process.stdout.write(`\r  ${pct}% (${done}/${total})  ${sourceTag} ${meta.word.padEnd(22)}`);
+        }
       });
 
       process.stdout.write('\n\n');
-      console.log(chalk.green(`✓ 完成：新翻 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 無英文定義 ${result.noEnCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
+      console.log(chalk.green(`✓ 定義翻譯：新翻 ${result.fetchedCount} 筆 | 跳過 ${result.skippedCount} 筆 | 無英文定義 ${result.noEnCount} 筆 | 失敗 ${result.failedCount} 筆 | 共 ${result.totalCount} 詞`));
+      if (wordZhPhaseStarted) {
+        console.log(chalk.green(`✓ word_zh 直翻：新翻 ${result.wordZhFetched} 筆（共 ${result.wordZhPendingCount} 詞待翻）`));
+      } else {
+        console.log(chalk.green(`✓ word_zh 直翻：全部已有快取，無需重新翻譯`));
+      }
       console.log(chalk.gray(`中文快取總筆數：${getWordCache().cacheZhSize} 筆`));
       console.log(chalk.gray(`中文快取路徑：${getWordCache().cacheZhFilePath}`));
       return;
