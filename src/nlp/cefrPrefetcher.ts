@@ -154,6 +154,8 @@ export interface PrefetchZhResult {
   failedCount:       number;
   wordZhFetched:     number;
   wordZhPendingCount: number;
+  missingEnWords:    string[];  // 最終仍無英文定義的 CEFR 詞
+  missingZhWords:    string[];  // 最終仍無中文翻譯（definition_zh + word_zh 均空）的 CEFR 詞
 }
 
 const DEEPL_BATCH = 50;
@@ -327,7 +329,16 @@ export async function prefetchCefrZhToWordCache(
   }
 
   wc.flush();
-  return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount, wordZhFetched, wordZhPendingCount: wordZhMissing.length };
+
+  // 最終狀態掃描：找出仍缺 EN 或 ZH 的 CEFR 詞
+  const missingEnWords: string[] = [];
+  const missingZhWords: string[] = [];
+  for (const word of cefrWords) {
+    if (!wc.get(word, null)) missingEnWords.push(word);
+    if (!wc.getChinese(word, null) && !wc.getWordZh(word, null)) missingZhWords.push(word);
+  }
+
+  return { totalCount: cefrWords.length, fetchedCount, skippedCount, noEnCount, failedCount, wordZhFetched, wordZhPendingCount: wordZhMissing.length, missingEnWords, missingZhWords };
 }
 
 // ── 片語庫 MW 預查 ─────────────────────────────────────────────────────────────

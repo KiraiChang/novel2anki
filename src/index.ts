@@ -270,6 +270,49 @@ program
       }
       console.log(chalk.gray(`中文快取總筆數：${getWordCache().cacheZhSize} 筆`));
       console.log(chalk.gray(`中文快取路徑：${getWordCache().cacheZhFilePath}`));
+
+      // ── 漏字報告與補填清單輸出 ────────────────────────────────────────────────
+      const missingEnCount = result.missingEnWords.length;
+      const missingZhCount = result.missingZhWords.length;
+      const allMissing = [...new Set([...result.missingEnWords, ...result.missingZhWords])].sort();
+      if (allMissing.length > 0) {
+        console.log('');
+        console.log(chalk.yellow(`⚠ 仍有漏字（無英文定義或無中文翻譯）：`));
+        console.log(chalk.gray(`  無英文定義：${missingEnCount} 詞`));
+        console.log(chalk.gray(`  無中文翻譯：${missingZhCount} 詞`));
+
+        // 建立補填清單：每詞帶已有資料，缺的留空讓使用者填入
+        const missingEnSet = new Set(result.missingEnWords);
+        const missingZhSet = new Set(result.missingZhWords);
+        const missingList = {
+          generated: new Date().toISOString(),
+          missing_en_count: missingEnCount,
+          missing_zh_count: missingZhCount,
+          note: '填入空白欄位後存檔。definition_en 可複製至 word-dict.json；definition_zh / word_zh 需重新執行 --prefetch-cefr-zh 前先手動寫入快取，或等下版支援 --load-missing。',
+          words: allMissing.map(word => {
+            const missing: string[] = [];
+            if (missingEnSet.has(word)) missing.push('en');
+            if (missingZhSet.has(word)) missing.push('zh');
+            const enHit = wc.get(word, null);
+            return {
+              word,
+              missing,
+              definition_en:  enHit?.def ?? '',
+              definition_zh:  wc.getChinese(word, null) ?? '',
+              word_zh:        wc.getWordZh(word, null)  ?? '',
+            };
+          }),
+        };
+
+        const outputDir = path.join(process.cwd(), 'output');
+        fs.mkdirSync(outputDir, { recursive: true });
+        const missingPath = path.join(outputDir, 'missing-cefr-words.json');
+        fs.writeFileSync(missingPath, JSON.stringify(missingList, null, 2), 'utf-8');
+        console.log(chalk.yellow(`  補填清單已輸出：${missingPath}`));
+      } else {
+        console.log(chalk.green(`✓ 所有 CEFR 詞均已有英文定義與中文翻譯`));
+      }
+
       return;
     }
 

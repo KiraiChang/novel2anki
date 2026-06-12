@@ -970,3 +970,89 @@ describe('prefetchCefrZhToWordCache — word_zh translation', () => {
     expect(result.wordZhFetched).toBe(2);
   });
 });
+
+// ── prefetchCefrZhToWordCache — missingEnWords / missingZhWords ───────────────
+
+describe('prefetchCefrZhToWordCache — missing words report', () => {
+  it('should include words with no EN cache entry in missingEnWords', async () => {
+    // Given: run 無 EN 條目；bear 有 EN；go 無 EN
+    mockCache.getAllCacheEntriesForWord.mockImplementation((word: string) =>
+      word === 'bear' ? [{ pos: 'noun', def: '(noun) large mammal' }] : [],
+    );
+    mockCache.get.mockReturnValue(null);                     // 所有詞 EN cache miss
+    mockCache.getChinese.mockReturnValue(null);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑', '熊', '去']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: run 和 go 無 EN → 都在 missingEnWords；bear 有 EN cache
+    // 注意：get() mock 全回 null，所以三個詞都在 missingEnWords
+    expect(result.missingEnWords).toEqual(expect.arrayContaining(['run', 'go']));
+    expect(result.missingEnWords).toHaveLength(3);  // 全都 null
+  });
+
+  it('should not include words that have EN definition in missingEnWords', async () => {
+    // Given: 所有詞都有 EN cache hit
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getWordZh.mockReturnValue('已快取');
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: 無漏字
+    expect(result.missingEnWords).toHaveLength(0);
+  });
+
+  it('should include words with no ZH translation in missingZhWords', async () => {
+    // Given: 所有詞有 EN 但翻譯失敗（batchTranslate 拋錯），且 getWordZh 也沒有
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
+    mockCache.getChinese.mockReturnValue(null);
+    mockCache.getWordZh.mockReturnValue(null);
+    (batchTranslate as jest.Mock).mockRejectedValue(new Error('DeepL quota exceeded'));
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: 翻譯失敗，ZH 仍然缺失
+    expect(result.missingZhWords).toEqual(expect.arrayContaining(['run', 'bear', 'go']));
+  });
+
+  it('should not include words that have getChinese value in missingZhWords', async () => {
+    // Given: 所有詞有 EN 且 getChinese 有值
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.getChinese.mockReturnValue('已有翻譯');
+    mockCache.getWordZh.mockReturnValue(null);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: getChinese 有值 → 不算缺 ZH
+    expect(result.missingZhWords).toHaveLength(0);
+  });
+
+  it('should not include words that have word_zh value in missingZhWords', async () => {
+    // Given: getChinese 無值，但 getWordZh 有值
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([]);    // no EN → noEnCount
+    mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
+    mockCache.getChinese.mockReturnValue(null);
+    mockCache.getWordZh.mockReturnValue('直翻詞');
+    (batchTranslate as jest.Mock).mockResolvedValue(['跑', '熊', '去']);
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then: getWordZh 有值 → 不算缺 ZH
+    expect(result.missingZhWords).toHaveLength(0);
+  });
+
+  it('should return empty arrays when all words have both EN and ZH', async () => {
+    // Given: 全部完整
+    mockCache.getAllCacheEntriesForWord.mockReturnValue([{ pos: 'noun', def: '(noun) test' }]);
+    mockCache.hasChinese.mockReturnValue(true);
+    mockCache.get.mockReturnValue({ def: '(noun) test', tier: 'cache' as const });
+    mockCache.getChinese.mockReturnValue('繁體中文定義');
+    mockCache.getWordZh.mockReturnValue('直翻詞');
+    // When
+    const result = await prefetchCefrZhToWordCache(DEEPL_CONFIG, undefined, TEST_WORDS);
+    // Then
+    expect(result.missingEnWords).toHaveLength(0);
+    expect(result.missingZhWords).toHaveLength(0);
+  });
+});
