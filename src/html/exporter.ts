@@ -319,6 +319,7 @@ export function exportToComparisonHtml(
 interface FlashCard {
   primary: string;    // 大字（單字 / 人名 / 問題 / 克漏字句）
   secondary: string;  // 小字（definition_en / firstMention / ''）
+  example?: string;   // 正面底部例句（italic，margin-top: auto 推至底部；vocab 專用）
   answer: string;     // 翻面後的答案
   word_zh?: string;   // 背面頂部顯示的中文對應詞（vocab 專用）
 }
@@ -328,9 +329,9 @@ function buildFlashDeck(cards: GeneratedCards): Record<string, FlashCard[]> {
     vocab: cards.vocab.map(c => ({
       primary: c.word,
       secondary: c.definition_en ?? '',
+      example: c.exampleFromText,
       answer: (c.definition_zh || '（尚未填入定義）') +
-              '\n\n' + c.exampleFromText +
-              (c.exampleZh ? '\n' + c.exampleZh : ''),
+              (c.exampleZh ? '\n\n' + c.exampleZh : ''),
       word_zh: c.word_zh,
     })),
     cloze: cards.cloze.map(c => ({
@@ -440,7 +441,12 @@ main {
   margin-top: 12px; line-height: 1.6; max-height: 80px; overflow-y: auto;
 }
 .fc-secondary:empty { display: none; }
-.fc-flip-hint { font-size: 11px; color: #ccc; margin-top: auto; padding-top: 10px; }
+.fc-example {
+  font-size: 14px; color: #777; font-style: italic;
+  margin-top: auto; padding-top: 12px; line-height: 1.6;
+}
+.fc-example:empty { display: none; }
+.fc-flip-hint { font-size: 11px; color: #ccc; margin-top: 8px; }
 .fc-word-zh {
   font-size: 22px; font-weight: 700; color: #27ae60; margin-bottom: 8px;
 }
@@ -508,6 +514,7 @@ function buildFlashHtmlFromData(
         <div class="fc-front">
           <div id="fc-primary" class="fc-primary"></div>
           <div id="fc-secondary" class="fc-secondary"></div>
+          <div id="fc-example" class="fc-example"></div>
           <div class="fc-flip-hint">點擊卡片 / 空白鍵 翻面 ▼</div>
         </div>
         <div class="fc-back">
@@ -541,6 +548,8 @@ function render() {
   const c = cards[idx];
   document.getElementById('fc-primary').innerHTML = rend(c.primary);
   document.getElementById('fc-secondary').innerHTML = rend(c.secondary);
+  const exEl = document.getElementById('fc-example');
+  if (exEl) exEl.innerHTML = rend(c.example || '');
   const wzEl = document.getElementById('fc-word-zh');
   if (wzEl) wzEl.textContent = c.word_zh || '';
   document.getElementById('fc-answer').innerHTML = rend(c.answer);
