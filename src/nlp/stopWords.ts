@@ -36,4 +36,6 @@ export const STOP_WORDS = new Set([
   'during','within','throughout','despite','toward','towards',
   // 補充：CEFR 字庫中存在但無需 MW 定義或字卡的功能詞
   'nor','cannot','ah','hey','hi','oh','yeah',
+  // A2 以下基礎詞：MW 無有效定義或太常見不需字卡
+  'actually','guy','internet','sir',
 ]);
