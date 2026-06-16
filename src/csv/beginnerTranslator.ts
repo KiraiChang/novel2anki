@@ -3,6 +3,7 @@ import { TranslatorConfig, batchTranslate } from '../cards/translator';
 import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProtector';
 import { getWordCache, DefinitionLayerCache } from '../nlp/wordCache';
 import { applyNormalization } from '../nlp/tokenNormalizer';
+import { batchWsd, WsdRequest } from './wsdClient';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -131,6 +132,39 @@ async function fetchDefinitionFromMW(
   return null;
 }
 
+/**
+ * 取得 MW API 回傳的所有可用 (fl, shortdef) 配對（供 WSD 使用）。
+ * POS 匹配的 entry 排前面，但不過濾掉其他 entry，讓 WSD 有更多候選詞義。
+ * 回傳 null 表示 MW 無此詞或網路失敗。
+ */
+async function fetchAllShortdefsFromMW(
+  word: string,
+  targetPOS: string | null,
+  apiKey: string,
+): Promise<Array<{ fl: string; shortdef: string }> | null> {
+  const res = await fetch(
+    `${MW_API}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
+    { signal: AbortSignal.timeout(5000) },
+  );
+  if (!res.ok) return null;
+  const raw = await res.json() as (MWEntry | string)[];
+  const entries = raw.filter((e): e is MWEntry => typeof e === 'object' && Array.isArray(e.shortdef) && e.shortdef.length > 0);
+  if (entries.length === 0) return null;
+
+  // POS 匹配的 entry 排前面
+  const ordered = targetPOS
+    ? [...entries.filter(e => e.fl === targetPOS), ...entries.filter(e => e.fl !== targetPOS)]
+    : entries;
+
+  const results: Array<{ fl: string; shortdef: string }> = [];
+  for (const entry of ordered) {
+    for (const def of entry.shortdef ?? []) {
+      if (isUsableMW(def)) results.push({ fl: entry.fl ?? 'unknown', shortdef: def });
+    }
+  }
+  return results.length > 0 ? results : null;
+}
+
 // ── Free Dictionary API（fallback）────────────────────────────────────────────
 
 interface FreeDictEntry {
@@ -252,12 +286,13 @@ export interface MWFetchResult {
   fetchedCount: number;
   skippedCount: number;
   outputPath: string;
+  wsdCount?: number; // WSD 改變了詞義選擇的筆數（--wsd 模式才有值）
 }
 
 export async function fetchBeginnerWordsMW(
   csvPath: string,
   onProgress?: (current: number, total: number, meta?: { source?: DictSource; word?: string }) => void,
-  options?: { force?: boolean },
+  options?: { force?: boolean; wsd?: boolean },
 ): Promise<MWFetchResult> {
   const content = fs.readFileSync(csvPath, 'utf-8');
   const lines = splitLines(content);
@@ -293,22 +328,147 @@ export async function fetchBeginnerWordsMW(
   const defEnSrcColIdx = idx['definition_en_source'];
   const get = (cols: string[], col: string) => cols[idx[col]] ?? '';
 
+  // WSD 模式也處理已有 definition_en（但尚未消歧）的行
   const needFetch = rows
     .map((cols, i) => ({ i, cols }))
-    .filter(({ cols }) => options?.force || !get(cols, 'definition_en').trim());
+    .filter(({ cols }) => {
+      if (options?.force) return true;
+      const defEn = get(cols, 'definition_en').trim();
+      if (!defEn) return true;
+      if (options?.wsd) {
+        // WSD 模式：跳過已做過消歧的行（source = 'mw+wsd'）
+        const src = get(cols, 'definition_en_source').trim();
+        return src !== 'mw+wsd';
+      }
+      return false;
+    });
 
   const skippedCount = rows.length - needFetch.length;
 
-  for (let j = 0; j < needFetch.length; j++) {
-    const { i, cols } = needFetch[j];
-    const lemma = get(cols, 'lemma');
-    const pos   = get(cols, 'pos');
-    const { def, source } = await fetchEnglishDefinition(lemma, pos);
-    const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
-    while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
-    rows[i][defEnColIdx]    = def;
-    rows[i][defEnSrcColIdx] = srcStr;
-    onProgress?.(j + 1, needFetch.length, { source, word: lemma });
+  if (!options?.wsd) {
+    // ── 標準路徑（不含 WSD）────────────────────────────────────────────────────
+    for (let j = 0; j < needFetch.length; j++) {
+      const { i, cols } = needFetch[j];
+      const lemma = get(cols, 'lemma');
+      const pos   = get(cols, 'pos');
+      const { def, source } = await fetchEnglishDefinition(lemma, pos);
+      const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
+      while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+      rows[i][defEnColIdx]    = def;
+      rows[i][defEnSrcColIdx] = srcStr;
+      onProgress?.(j + 1, needFetch.length, { source, word: lemma });
+    }
+  } else {
+    // ── WSD 路徑（兩階段：MW 取全部 shortdefs → 批次推論）────────────────────
+    const mwKey = process.env.MW_API_KEY;
+    const wordCache = getWordCache();
+
+    // (rowIdx, 候選詞義列表, context sentence)
+    type WsdItem = { rowIdx: number; lemma: string; pos: string; sentence: string; candidates: Array<{ fl: string; shortdef: string }> };
+    const wsdPending: WsdItem[] = [];
+
+    // Phase 1：為每個詞取全部 shortdefs（或 fallback 到單一定義）
+    for (let j = 0; j < needFetch.length; j++) {
+      const { i, cols } = needFetch[j];
+      const lemma    = get(cols, 'lemma');
+      const pos      = get(cols, 'pos');
+      const sentence = get(cols, 'context_sentence').trim();
+      const targetPOS = pos ? normalizePOS(pos) : null;
+
+      onProgress?.(j + 1, needFetch.length, { word: lemma });
+
+      // 無 MW key 或無語境句子：直接走單一定義路徑
+      if (!mwKey || !sentence) {
+        const { def, source } = await fetchEnglishDefinition(lemma, pos);
+        const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
+        while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+        rows[i][defEnColIdx]    = def;
+        rows[i][defEnSrcColIdx] = srcStr;
+        continue;
+      }
+
+      let candidates: Array<{ fl: string; shortdef: string }> | null = null;
+      try {
+        candidates = await fetchAllShortdefsFromMW(lemma, targetPOS, mwKey);
+      } catch { /* fallthrough */ }
+
+      // MW 無結果或只有一個候選：直接用 fetchEnglishDefinition
+      if (!candidates || candidates.length <= 1) {
+        const def = candidates?.[0] ? `(${candidates[0].fl}) ${candidates[0].shortdef}` : null;
+        if (def) {
+          wordCache.setCache(lemma, pos, def, 'MW');
+          while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+          rows[i][defEnColIdx]    = def;
+          rows[i][defEnSrcColIdx] = 'mw';
+        } else {
+          const { def: d, source } = await fetchEnglishDefinition(lemma, pos);
+          const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
+          while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+          rows[i][defEnColIdx]    = d;
+          rows[i][defEnSrcColIdx] = srcStr;
+        }
+        continue;
+      }
+
+      // 多候選：先查 WSD 快取
+      const shortdefTexts = candidates.map(c => c.shortdef);
+      const cached = wordCache.getWsd(lemma, pos, sentence, shortdefTexts);
+      if (cached) {
+        const chosen = candidates[cached.chosenIndex] ?? candidates[0];
+        const def = `(${chosen.fl}) ${chosen.shortdef}`;
+        while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
+        rows[i][defEnColIdx]    = def;
+        rows[i][defEnSrcColIdx] = 'cache';
+        continue;
+      }
+
+      wsdPending.push({ rowIdx: i, lemma, pos, sentence, candidates });
+    }
+
+    // Phase 2：批次 WSD 推論
+    if (wsdPending.length > 0) {
+      const wsdRequests: WsdRequest[] = wsdPending.map(item => ({
+        word: item.lemma,
+        shortdefs: item.candidates.map(c => c.shortdef),
+        sentence: item.sentence,
+      }));
+
+      const wsdResults = await batchWsd(wsdRequests);
+      const wsdMap = new Map(wsdResults.map(r => [r.word, r]));
+
+      let wsdChanged = 0;
+      for (const item of wsdPending) {
+        const result    = wsdMap.get(item.lemma);
+        const chosenIdx = result?.chosenIndex ?? 0;
+        const score     = result?.score ?? 0;
+        const chosen    = item.candidates[chosenIdx] ?? item.candidates[0];
+        const def = `(${chosen.fl}) ${chosen.shortdef}`;
+        const src = chosenIdx !== 0 ? 'mw+wsd' : 'mw';
+        if (chosenIdx !== 0) wsdChanged++;
+
+        wordCache.setCache(item.lemma, item.pos, def, 'MW');
+        wordCache.setWsd(item.lemma, item.pos, item.sentence, chosenIdx, score, item.candidates.map(c => c.shortdef));
+
+        while (rows[item.rowIdx].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[item.rowIdx].push('');
+        rows[item.rowIdx][defEnColIdx]    = def;
+        rows[item.rowIdx][defEnSrcColIdx] = src;
+      }
+
+      const result: MWFetchResult = {
+        fetchedCount: needFetch.length,
+        skippedCount,
+        outputPath: csvPath,
+        wsdCount: wsdChanged,
+      };
+      wordCache.flush();
+      const headerLine = headers.map(escapeField).join(',');
+      const dataLines  = rows.map(cols => {
+        while (cols.length < headers.length) cols.push('');
+        return cols.map(escapeField).join(',');
+      });
+      fs.writeFileSync(csvPath, [headerLine, ...dataLines].join('\n'), 'utf-8');
+      return result;
+    }
   }
 
   const headerLine = headers.map(escapeField).join(',');

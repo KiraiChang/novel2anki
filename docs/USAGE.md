@@ -47,6 +47,8 @@ npx ts-node src/index.ts <輸入> [選項]
   --beginner-include-a1   包含 A1 基礎詞彙（預設：排除）
   --beginner-split <N>    將翻譯 CSV 分割為每 N 個詞彙一個檔案（搭配 --beginner）
   --mw                    MW 預查：預先查詢英文定義寫入 CSV 的 definition_en 欄（需設定 MW_API_KEY）
+  --wsd                   語意消歧：搭配 --mw，依 context_sentence 從 MW 多個詞義中選出最符合語境的定義
+                          （需先執行 npm run setup:wsd 建立 Python venv）
   --update-dict           將 CSV 的 definition_en 升級到個人精選字典 word-dict.json
   --prefetch-cefr         批次預查 CEFR 字庫（5782 詞）MW 英文定義，存入 word-cache.json（需設定 MW_API_KEY）
   --prefetch-cefr-zh      批次翻譯 CEFR 字庫：英文定義（definition_zh）+ 單字直翻（word_zh），存入 word-cache-zh.json
@@ -319,6 +321,41 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 > **字典來源**：翻譯前會先從字典 API 取得英文定義再送 DeepL。有設定 `MW_API_KEY` 時使用 Merriam-Webster（品質較佳），否則使用 Free Dictionary API（dictionaryapi.dev）作為 fallback。
 >
 > `--translate` 會自動跳過 `definition_en`、`definition_zh`、`context_sentence_zh`、`word_zh` **四欄皆已填入**的列；四者只要有任一空白，就會補齊那個欄位（其餘已填的欄位不覆寫）。重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--translate-force`：
+
+#### `--wsd`：語意消歧（Word Sense Disambiguation）
+
+MW API 對多義詞（如 "bank"、"run"、"light"）會回傳多個詞義，預設取第一個。`--wsd` 搭配 `--mw` 使用，利用 `context_sentence` 比對語境，從 MW 的多個詞義中選出最符合小說用法的那一個。
+
+| 情境 | `definition_en_source` |
+|------|----------------------|
+| WSD 選擇了非預設詞義 | `mw+wsd` |
+| WSD 確認第一個詞義即最佳 | `mw` |
+| WSD 快取命中 | `cache` |
+
+**環境設定（一次性）**
+
+```bash
+npm run setup:wsd
+# 等同於：python scripts/wsd/setup.py
+# 在 scripts/wsd/.venv/ 建立 Python venv 並安裝 sentence-transformers
+```
+
+> 首次執行時會自動下載 `all-MiniLM-L6-v2` 模型（~22 MB），存放於 `~/.cache/huggingface/`。
+
+**使用方式**
+
+```bash
+# 一步到位：MW 預查 + WSD 語意消歧
+npx ts-node src/index.ts output/ -d "Novel" --mw --wsd
+
+# 分兩步執行（已跑過 --mw 後，補做 WSD）
+npx ts-node src/index.ts output/ -d "Novel" --wsd
+
+# 強制對所有詞重新消歧（忽略已有 mw+wsd 快取）
+npx ts-node src/index.ts output/ -d "Novel" --mw --wsd --force
+```
+
+WSD 結果快取於 `~/.novel2anki/wsd-cache.json`，key 包含語境句子 hash，同一單字在不同語境各自獨立。重複執行時命中快取自動跳過 Python 推論，無額外耗時。
 >
 > ```bash
 > # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
@@ -356,7 +393,7 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 | `coverage_rank` | 學習優先順序（1 = 最高頻，最先學） |
 | `global_frequency` | 全書出現次數 |
 | `definition_en` | 英文定義（`--mw` 自動填入；可手動編輯作書級客製化；`--update-dict` 升級至全域字典） |
-| `definition_en_source` | `definition_en` 來源（`mw` / `free` / `fallback` / `cache` / `dict`） |
+| `definition_en_source` | `definition_en` 來源（`mw` / `mw+wsd` / `free` / `fallback` / `cache` / `dict`） |
 | `context_sentence` | 最佳英文例句，提供翻譯語境（字卡背面正面） |
 | `context_sentence_zh` | 例句中文翻譯（`--translate` 自動填入，字卡背面輔助理解） |
 | `context_sentence_zh_source` | `context_sentence_zh` 來源（`deepl` / `azure` / `google` / `claude` / `cache`） |
@@ -464,6 +501,7 @@ Azure 免費額度 2,000,000 字/月，5782 詞兩批合計約 46 萬字元，�
 | `cefr-wordlist.json` | CEFR 字庫（5,732 詞，A1–C2） | `scripts/build-cefr.js` 產生；若存在則優先讀此處 |
 | `phrase-list.json` | 學術／常見片語庫（1,409 條，含 OPAL / OPL 來源） | `scripts/extract-phrase-lists.py` 產生；若存在則優先讀此處 |
 | `phrase-cache.json` | MW 片語定義快取（命中與 no-def 均存） | `--prefetch-phrases` 建立；存在時自動跳過已查詢的片語 |
+| `wsd-cache.json` | WSD 語意消歧結果快取（key = `word:pos::fnv1a(sentence)`） | `--wsd` 時自動存入；key 含語境 hash，不同語境各自獨立 |
 
 ## 例句翻譯快取（`--fill-sent-zh`）
 

@@ -71,6 +71,7 @@ program
   .option('--beginner-include-a1', '包含 A1 基礎詞彙（預設：排除）')
   .option('--beginner-split <數量>', '將翻譯 CSV 分割為每 N 個詞彙一個檔案')
   .option('--mw', 'MW 預查模式：預先擷取 Merriam-Webster 英文定義並寫入 CSV（設定 MW_API_KEY 時使用付費版；未設定則 fallback 免費字典）')
+  .option('--wsd', '語意消歧（WSD）：搭配 --mw 使用，依 context_sentence 從 MW 多個詞義中選出最符合語境的定義（需安裝 Python 與 sentence-transformers）')
   .option('--update-dict', '將 CSV 中已填寫的 definition_en 升級到個人單字庫（word-dict.json），未來所有書優先使用')
   .option('--fill-sent-zh', '雙向同步例句翻譯：已有 context_sentence_zh 的寫入 sentence-cache.json；空白的從快取補填')
   .option('--fill-def-zh [layers]', '雙向同步詞彙中文定義。可加 =domain,book 指定分層快取（例：--fill-def-zh=fantasy,the-demon-awakens）。未指定時只同步全局快取（CEFR 已知詞才寫入 global）')
@@ -101,6 +102,7 @@ program
     beginnerIncludeA1?: boolean;
     beginnerSplit?: string;
     mw?: boolean;
+    wsd?: boolean;
     updateDict?: boolean;
     fillSentZh?: boolean;
     fillDefZh?: boolean | string;  // true = no layers; string = "domain" or "domain,book"
@@ -112,7 +114,7 @@ program
     cleanPosCache?: boolean;
     cleanZhBase?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
+    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.wsd && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --translate / --translate-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -144,8 +146,10 @@ program
     if (options.prefetchPhrases) console.log(chalk.green('   [片語庫 MW 預查模式]'));
     if (options.cleanPosCache)   console.log(chalk.red('   [POS 快取清除模式]'));
     if (options.cleanZhBase)     console.log(chalk.red('   [ZH base key 清除模式]'));
-    if (options.mw && !options.translate && !options.translateForce) console.log(chalk.green('   [MW 預查模式]'));
+    if (options.mw && !options.wsd && !options.translate && !options.translateForce) console.log(chalk.green('   [MW 預查模式]'));
+    if (options.mw && options.wsd && !options.translate && !options.translateForce) console.log(chalk.green('   [MW 預查 + WSD 語意消歧模式]'));
     if (options.mw && (options.translate || options.translateForce)) console.log(chalk.green(`   [MW 預查 + ${providerLabel} 翻譯模式]`));
+    if (options.wsd && !options.mw) console.log(chalk.green('   [WSD 語意消歧模式（重新評估已有定義）]'));
     if (options.translate && !isCompare) console.log(chalk.blue(`   [${providerLabel} 翻譯模式]`));
     if (isCompare) console.log(chalk.blue(`   [${providerLabel} 比對模式：${providerLabel} vs ${options.offline ? `Ollama ${ollamaConfig!.model}` : 'Claude API'}]`));
     console.log(chalk.gray(`   牌組：${deckName}`));
@@ -528,13 +532,14 @@ program
               const mwResult = await fetchBeginnerWordsMW(csvPath, (cur, total, meta) => {
                 const sourceTag = meta?.source === 'dict' ? chalk.magenta('[字典]') : meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : meta?.source === 'cached' ? chalk.blue('[快取]') : chalk.red('[fallback]');
                 process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
-              });
-              process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個`)}\n`);
+              }, { wsd: !!options.wsd });
+              const wsdNote = options.wsd && mwResult.wsdCount != null ? ` | WSD 改選 ${mwResult.wsdCount} 個` : '';
+              process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個${wsdNote}`)}\n`);
             }
           }
           console.log('');
           if (!options.translate && !options.translateForce) {
-            console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
+            console.log(chalk.cyan(`MW 預查${options.wsd ? ' + WSD 語意消歧' : ''}完成。definition_en 欄位已寫入 CSV。`));
             console.log(chalk.cyan(`下一步：執行以下指令進行 ${providerLabel} 翻譯：`));
             const outputDir = isDirectory ? pdfFile : path.dirname(beginnerWordsCsvs[0]);
             console.log(chalk.white(`  npx ts-node src/index.ts ${outputDir} -d "${deckName}" --translate`));
@@ -808,21 +813,23 @@ program
       }
 
       // MW 預查（可單獨或搭配 --deepl）
-      if (options.mw) {
+      if (options.mw || options.wsd) {
         console.log('');
         const { unfetchedCount } = estimateMWFetch(wordsCsvPaths);
-        console.log(chalk.cyan(`MW 預查：共 ${unfetchedCount} 個詞彙待預查`));
+        if (options.mw) console.log(chalk.cyan(`MW 預查：共 ${unfetchedCount} 個詞彙待預查`));
+        if (options.wsd && !options.mw) console.log(chalk.cyan('WSD 語意消歧：重新評估已有 MW 定義的詞彙'));
         for (const csvPath of wordsCsvPaths) {
-          process.stdout.write(chalk.yellow(`正在預查 ${path.basename(csvPath)}...\n`));
+          process.stdout.write(chalk.yellow(`正在${options.wsd ? '預查 + WSD ' : '預查 '}${path.basename(csvPath)}...\n`));
           const mwResult = await fetchBeginnerWordsMW(csvPath, (cur, total, meta) => {
             const sourceTag = meta?.source === 'MW' ? chalk.green('[MW]') : meta?.source === 'free' ? chalk.gray('[Free]') : chalk.red('[fallback]');
             process.stdout.write(chalk.yellow(`\r  取得英文定義... ${cur}/${total}  `) + ` ${sourceTag} ${meta?.word ?? ''}   `);
-          });
-          process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個`)}\n`);
+          }, { wsd: !!options.wsd });
+          const wsdNote = options.wsd && mwResult.wsdCount != null ? ` | WSD 改選 ${mwResult.wsdCount} 個` : '';
+          process.stdout.write(`\r${chalk.green(`  ✓ 完成：預查 ${mwResult.fetchedCount} 個，跳過 ${mwResult.skippedCount} 個${wsdNote}`)}\n`);
         }
         console.log('');
         if (!options.translate && !options.translateForce) {
-          console.log(chalk.cyan('MW 預查完成。definition_en 欄位已寫入 CSV。'));
+          console.log(chalk.cyan(`MW 預查${options.wsd ? ' + WSD 語意消歧' : ''}完成。definition_en 欄位已寫入 CSV。`));
           console.log(chalk.cyan(`下一步：執行以下指令進行 ${providerLabel} 翻譯：`));
           if (wordsCsvPaths.length > 1) {
             console.log(chalk.white(`  npx ts-node src/index.ts ${options.output} -d "${deckName}" --translate`));

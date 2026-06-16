@@ -8,7 +8,8 @@
     "dev": "ts-node src/index.ts",
     "test": "jest",
     "test:unit": "jest src/__tests__/unit",
-    "test:e2e": "jest src/__tests__/e2e"
+    "test:e2e": "jest src/__tests__/e2e",
+    "setup:wsd": "python scripts/wsd/setup.py"
   },
   "jest": {
     "preset": "ts-jest",

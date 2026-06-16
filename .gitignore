@@ -148,3 +148,4 @@ vite.config.ts.timestamp-*
 
 # Data files are stored externally via WORD_CACHE_PATH (.env)
 /src/data/
+scripts/wsd/.venv/*

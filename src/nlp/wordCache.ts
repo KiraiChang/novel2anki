@@ -32,6 +32,14 @@ const SENTENCE_SOURCE_PRIORITY: Record<string, number> = {
 interface PhraseCacheEntry { def: string; source: string; }
 type PhraseCacheData = Record<string, PhraseCacheEntry>;
 
+// wsd-cache.json：WSD 詞義消歧快取，key = word:pos::fnv1a(sentence)
+interface WsdCacheEntry {
+  chosenIndex: number;
+  score: number;
+  shortdefsSnapshot: string[]; // MW shortdefs 快照，用於偵測 MW 更新導致 index 失效
+}
+type WsdCacheData = Record<string, WsdCacheEntry>;
+
 export type CacheTier = 'dict' | 'cache';
 
 /** FNV-1a 32-bit hash → 8-char hex（效能優先，不用於密碼學） */
@@ -50,16 +58,19 @@ export class WordCacheManager {
   private readonly cacheZhPath: string;
   private readonly sentenceCachePath: string;
   private readonly phraseCachePath: string;
+  private readonly wsdCachePath: string;
   private dict: DictData = {};
   private cache: CacheData = {};
   private cacheZh: CacheZhData = {};
   private sentenceCache: SentenceCacheData = {};
   private phraseCache: PhraseCacheData = {};
+  private wsdCache: WsdCacheData = {};
   private dictDirty = false;
   private cacheDirty = false;
   private cacheZhDirty = false;
   private sentenceCacheDirty = false;
   private phraseCacheDirty = false;
+  private wsdCacheDirty = false;
 
   constructor(baseDir?: string) {
     const dir = baseDir
@@ -70,11 +81,13 @@ export class WordCacheManager {
     this.cacheZhPath       = path.join(dir, 'word-cache-zh.json');
     this.sentenceCachePath = path.join(dir, 'sentence-cache.json');
     this.phraseCachePath   = path.join(dir, 'phrase-cache.json');
+    this.wsdCachePath      = path.join(dir, 'wsd-cache.json');
     this.dict          = this.loadDict();
     this.cache         = this.loadCache();
     this.cacheZh       = this.loadCacheZh();
     this.sentenceCache = this.loadSentenceCache();
     this.phraseCache   = this.loadPhraseCache();
+    this.wsdCache      = this.loadWsdCache();
   }
 
   private key(word: string, pos?: string | null): string {
@@ -310,6 +323,35 @@ export class WordCacheManager {
     return phrase.toLowerCase().trim() in this.phraseCache;
   }
 
+  /** WSD 快取 key：word:pos::fnv1a(sentence)（空 pos 用 'unknown'） */
+  private wsdKey(word: string, pos: string | null, sentence: string): string {
+    const w   = word.toLowerCase().trim();
+    const p   = (pos ?? 'unknown').toLowerCase().trim();
+    return `${w}:${p}::${fnv1a(sentence)}`;
+  }
+
+  /**
+   * 查找 WSD 快取。若 shortdefsSnapshot 與當前 shortdefs 不一致（MW 更新），視為快取失效。
+   * 回傳 null 表示未快取或快取失效。
+   */
+  getWsd(word: string, pos: string | null, sentence: string, currentShortdefs: string[]): { chosenIndex: number; score: number } | null {
+    const entry = this.wsdCache[this.wsdKey(word, pos, sentence)];
+    if (!entry) return null;
+    // shortdefsSnapshot 長度或內容不同 → MW 已更新，快取失效
+    if (entry.shortdefsSnapshot.length !== currentShortdefs.length) return null;
+    if (!entry.shortdefsSnapshot.every((s, i) => s === currentShortdefs[i])) return null;
+    return { chosenIndex: entry.chosenIndex, score: entry.score };
+  }
+
+  /** 寫入 WSD 快取（in-memory，呼叫 flush() 才落盤） */
+  setWsd(word: string, pos: string | null, sentence: string, chosenIndex: number, score: number, shortdefsSnapshot: string[]): void {
+    this.wsdCache[this.wsdKey(word, pos, sentence)] = { chosenIndex, score, shortdefsSnapshot };
+    this.wsdCacheDirty = true;
+  }
+
+  get wsdCacheSize(): number { return Object.keys(this.wsdCache).length; }
+  get wsdCacheFilePath(): string { return this.wsdCachePath; }
+
   /** 將 in-memory 的修改批次寫盤（dirty flag 保護，避免無謂 I/O） */
   flush(): void {
     if (this.cacheDirty)         { this.saveJson(this.cachePath,         this.cache);         this.cacheDirty         = false; }
@@ -317,6 +359,7 @@ export class WordCacheManager {
     if (this.cacheZhDirty)       { this.saveJson(this.cacheZhPath,       this.cacheZh);       this.cacheZhDirty       = false; }
     if (this.sentenceCacheDirty) { this.saveJson(this.sentenceCachePath, this.sentenceCache); this.sentenceCacheDirty = false; }
     if (this.phraseCacheDirty)   { this.saveJson(this.phraseCachePath,   this.phraseCache);   this.phraseCacheDirty   = false; }
+    if (this.wsdCacheDirty)      { this.saveJson(this.wsdCachePath,      this.wsdCache);      this.wsdCacheDirty      = false; }
   }
 
   get dictSize():          number { return Object.keys(this.dict).length;          }
@@ -380,6 +423,14 @@ export class WordCacheManager {
     try {
       if (fs.existsSync(this.phraseCachePath))
         return JSON.parse(fs.readFileSync(this.phraseCachePath, 'utf-8')) as PhraseCacheData;
+    } catch {}
+    return {};
+  }
+
+  private loadWsdCache(): WsdCacheData {
+    try {
+      if (fs.existsSync(this.wsdCachePath))
+        return JSON.parse(fs.readFileSync(this.wsdCachePath, 'utf-8')) as WsdCacheData;
     } catch {}
     return {};
   }
