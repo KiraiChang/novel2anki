@@ -40,6 +40,10 @@
 - **CSV → cache 寫回時遺失真實翻譯來源（**已修復 2026-06-11**）**：`syncDefinitionCacheWithCsv` 在 CSV→cache 方向呼叫 `bookCache.setIfEmpty` / `domainCache.setIfEmpty` / `wc.setChinese` 時，未傳入 CSV 欄位 `definition_zh_source` 的實際值，三處全數 fallback 為硬塞 `'csv'`（優先序 3）。後果：原本 `source='deepl'`（優先序 2）的翻譯存入 cache 後被誤記為 `'csv'`，等同人工校正等級，阻止後續 API 翻譯更新。修復：改為 `defZhSrc || 'csv'`（有值用真實來源，空值才 fallback `'csv'`）。
 - **未知 source 字串 fallback 為 priority 0，可被 cache 覆蓋（**已修復 2026-06-11**）**：`SOURCE_PRIORITY`（`beginnerTranslator.ts`）與 `SENTENCE_SOURCE_PRIORITY`（`wordCache.ts`）僅列出已知後端，不在 map 中的字串 fallback 為 `?? 0`（等同空白），`canFillFromCache` 回傳 `true`，導致 API 翻譯被 cache 覆蓋；`setSentenceZh` 的 `existingPriority !== 0` 條件永遠 false，sentence cache 條目每次 sync 都能被蓋掉。例：使用者手動標記 `source='chatgpt'` 的翻譯會被誤判為空白。修復：加入 `'chatgpt': 2`（與 deepl/azure 同級）至兩個 map。**新增任何翻譯來源標籤時需同步更新這兩處**，詳見 `docs/NOTES.md`。
 
+## WSD 詞義消歧（`--wsd`）
+
+- **`tokenizers` 0.20.x Rust encode_batch TypeError（**已修復 2026-06-16**）**：在 `sentence-transformers` 3.2.1 + `transformers` 4.46.3 + `tokenizers` 0.20.3 組合下，WSD 腳本嘗試批次編碼文字時，Rust 層的 `encode_batch` 丟出 `TypeError: TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]`。根因為 `tokenizers` 0.20.x 對輸入型別驗證更嚴格，與 `transformers` 4.46.x 的 `_batch_encode_plus` 所生成的輸入格式不相容。`sentence-transformers` 3.2.1 對 `BAAI/bge-base-en-v1.5` 有內建 query prompt 設定，與手動拼接 `BGE_QUERY_PREFIX` 組合後可能在 tokenizer 收到 `(str, None)` tuple 觸發此問題。**修復**：① `scripts/wsd/glossbert_wsd.py` 改以 `transformers` 直接載入模型（`AutoTokenizer` + `AutoModel`），完全移除對 `sentence_transformers.SentenceTransformer.encode()` 的依賴；② `AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)` 改用 Python 版 slow tokenizer，繞開 Rust `encode_batch`；③ `requirements.txt` 的 `sentence-transformers>=2.2.2` 改為 `transformers>=4.30.0`，簡化依賴樹。嵌入品質不變（仍使用 `bge-base-en-v1.5` CLS token + L2 正規化）。
+
 ## Mock 模式
 
 Mock 模式的已知限制獨立維護於 [mock/ISSUES.md](mock/ISSUES.md)。

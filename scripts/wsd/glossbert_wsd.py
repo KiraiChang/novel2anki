@@ -2,8 +2,8 @@
 """
 WSD（Word Sense Disambiguation）腳本：從 MW shortdefs 中選出最符合語境的詞義。
 
-使用 sentence-transformers 計算 context_sentence 與每個 shortdef 的 cosine similarity，
-選出分數最高的 shortdef index。
+使用 transformers 直接載入 BAAI/bge-base-en-v1.5，計算 context_sentence 與
+每個 shortdef 的 cosine similarity，選出分數最高的 shortdef index。
 
 模型選擇：
   CPU（預設）— BAAI/bge-base-en-v1.5（110 MB）
@@ -19,13 +19,7 @@ WSD（Word Sense Disambiguation）腳本：從 MW shortdefs 中選出最符合�
     需改寫推論邏輯（(sentence+gloss) → classification score，非 cosine-sim）。
 
 環境設定（venv，請在 scripts/wsd/ 目錄下執行）：
-  python -m venv .venv
-
-  # Windows
-  .venv\\Scripts\\pip install -r requirements.txt
-
-  # Mac / Linux
-  .venv/bin/pip install -r requirements.txt
+  python setup.py
 
 手動測試：
   # Windows
@@ -38,6 +32,8 @@ stdin:  JSON 陣列，每項 { word, shortdefs: string[], sentence }
 stdout: JSON 陣列，每項 { word, chosen_index, score }
 stderr: 進度資訊
 """
+
+from __future__ import annotations
 
 import os
 import sys
@@ -53,6 +49,35 @@ MODEL_NAME = "BAAI/bge-base-en-v1.5"
 
 # bge 非對稱 retrieval 前綴：sentence 加，shortdef 不加
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+def encode_texts(tokenizer, model, texts: list[str], batch_size: int = 32) -> np.ndarray:
+    """使用 transformers 直接編碼文字，回傳 L2 正規化的 embedding 矩陣。"""
+    import torch
+    import torch.nn.functional as F
+
+    if not texts:
+        hidden = model.config.hidden_size
+        return np.zeros((0, hidden), dtype=np.float32)
+
+    all_embeddings: list[np.ndarray] = []
+    for i in range(0, len(texts), batch_size):
+        batch = [str(t) for t in texts[i : i + batch_size]]
+        inputs = tokenizer(
+            batch,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            outputs = model(**inputs)
+        # BGE 使用 CLS token 作為句子表示
+        emb = outputs.last_hidden_state[:, 0, :]
+        emb = F.normalize(emb, p=2, dim=1)
+        all_embeddings.append(emb.cpu().numpy())
+
+    return np.vstack(all_embeddings)
 
 
 def main() -> None:
@@ -72,38 +97,39 @@ def main() -> None:
         print("[]")
         return
 
-    # 載入模型（只載入一次）
     print(f"[WSD] Loading model '{MODEL_NAME}'...", file=sys.stderr)
     try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer(MODEL_NAME)
+        from transformers import AutoTokenizer, AutoModel
+
+        # use_fast=False：繞開 tokenizers 0.20+ Rust encode_batch 型別驗證問題
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
+        model = AutoModel.from_pretrained(MODEL_NAME)
+        model.eval()
     except ImportError:
-        print("[WSD] ERROR: sentence-transformers not installed. Run: pip install -r scripts/wsd/requirements.txt", file=sys.stderr)
-        # Fallback：全部回傳 index 0
-        results = [{"word": r["word"], "chosen_index": 0, "score": 0.0} for r in requests]
+        print(
+            "[WSD] ERROR: transformers / torch not installed. Run: python scripts/wsd/setup.py",
+            file=sys.stderr,
+        )
+        results = [{"word": r.get("word", ""), "chosen_index": 0, "score": 0.0} for r in requests]
         print(json.dumps(results, ensure_ascii=False))
         return
 
     print(f"[WSD] Model loaded. Processing {len(requests)} items...", file=sys.stderr)
 
-    # bge asymmetric retrieval：sentence 加前綴，shortdef 不加
-    # 分開 encode 讓前綴只套用在 sentence 側
-    sentences = [BGE_QUERY_PREFIX + (req.get("sentence") or "") for req in requests]
+    # 準備 sentences（加 BGE query prefix）與所有 shortdefs
+    raw_sentences = [str(req.get("sentence") or "").strip() for req in requests]
+    sentences = [BGE_QUERY_PREFIX + s for s in raw_sentences]
+
     all_shortdefs: list[str] = []
     shortdef_counts: list[int] = []
     for req in requests:
         defs = req.get("shortdefs") or []
-        # 過濾掉 None / 非字串，避免 tokenizer TypeError
         clean = [str(d) for d in defs if d is not None and str(d).strip()]
         all_shortdefs.extend(clean)
         shortdef_counts.append(len(clean))
 
-    sentence_embeddings = model.encode(sentences, show_progress_bar=False, batch_size=64, normalize_embeddings=True)
-    # all_shortdefs 為空時（所有詞均無有效 shortdef）直接跳過 encode
-    gloss_embeddings = (
-        model.encode(all_shortdefs, show_progress_bar=False, batch_size=64, normalize_embeddings=True)
-        if all_shortdefs else []
-    )
+    sentence_embeddings = encode_texts(tokenizer, model, sentences)
+    gloss_embeddings = encode_texts(tokenizer, model, all_shortdefs) if all_shortdefs else np.zeros((0, model.config.hidden_size))
 
     results = []
     gloss_ptr = 0
@@ -120,8 +146,6 @@ def main() -> None:
         best_score = -1.0
         for j in range(n):
             g = gloss_embeddings[gloss_ptr + j]
-            if g is None:
-                continue
             # normalize_embeddings=True 後 dot product 等同 cosine similarity
             score = float(np.dot(sent_emb, g))
             if score > best_score:
@@ -131,7 +155,8 @@ def main() -> None:
         gloss_ptr += n
         results.append({"word": word, "chosen_index": best_idx, "score": round(best_score, 4)})
 
-    print(f"[WSD] Done. Changed {sum(1 for r in results if r['chosen_index'] != 0)} / {len(results)} selections.", file=sys.stderr)
+    changed = sum(1 for r in results if r["chosen_index"] != 0)
+    print(f"[WSD] Done. Changed {changed} / {len(results)} selections.", file=sys.stderr)
     print(json.dumps(results, ensure_ascii=False))
 
 
