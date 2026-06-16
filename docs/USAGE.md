@@ -321,6 +321,14 @@ npx ts-node src/index.ts output/ -d "Novel" --flash
 > **字典來源**：翻譯前會先從字典 API 取得英文定義再送 DeepL。有設定 `MW_API_KEY` 時使用 Merriam-Webster（品質較佳），否則使用 Free Dictionary API（dictionaryapi.dev）作為 fallback。
 >
 > `--translate` 會自動跳過 `definition_en`、`definition_zh`、`context_sentence_zh`、`word_zh` **四欄皆已填入**的列；四者只要有任一空白，就會補齊那個欄位（其餘已填的欄位不覆寫）。重複執行同一個檔案不會覆蓋已有翻譯。若需強制重新翻譯（例如修正錯誤翻譯），改用 `--translate-force`：
+>
+> ```bash
+> # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
+> npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --translate-force
+>
+> # 強制重新翻譯整個目錄的所有 words CSV
+> npx ts-node src/index.ts output/ -d "Novel" --translate-force
+> ```
 
 #### `--wsd`：語意消歧（Word Sense Disambiguation）
 
@@ -337,7 +345,7 @@ MW API 對多義詞（如 "bank"、"run"、"light"）會回傳多個詞義，預
 ```bash
 npm run setup:wsd
 # 等同於：python scripts/wsd/setup.py
-# 在 scripts/wsd/.venv/ 建立 Python venv 並安裝 sentence-transformers
+# 在 scripts/wsd/.venv/ 建立 Python venv 並安裝 transformers / torch
 ```
 
 > **模型**：預設使用 `BAAI/bge-base-en-v1.5`（110 MB，CPU 可跑）。首次執行時自動下載至 `~/.cache/huggingface/`。
@@ -367,14 +375,6 @@ WSD 使用兩層快取，均存於 `~/.novel2anki/`：
 | `wsd-cache.json` | JSON | `word:pos::fnv1a(sentence)` | — 語境相依 |
 
 重複執行時兩層均自動命中跳過；Python 推論失敗（score = 0）時不寫入 `wsd-cache.json`，下次重跑仍會嘗試消歧。
->
-> ```bash
-> # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
-> npx ts-node src/index.ts output/novel-beginner-words-part-01.csv -d "Novel" --translate-force
->
-> # 強制重新翻譯整個目錄的所有 words CSV
-> npx ts-node src/index.ts output/ -d "Novel" --translate-force
-> ```
 
 ### 輸出檔案
 

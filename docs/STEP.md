@@ -18,6 +18,29 @@
 
 ---
 
+### [STEP-011] WSD 語意消歧整合（`--wsd`）
+**狀態**：已完成
+**目標**：對多義詞（如 "bank"、"run"、"light"）利用 `context_sentence` 語意相似度，從 MW API 回傳的多個 shortdefs 中自動選出最符合小說語境的詞義，寫入 `definition_en`，並標記 `definition_en_source = 'mw+wsd'`。
+
+1. [x] `scripts/wsd/requirements.txt`：Python 依賴（`transformers>=4.30.0`、`torch>=2.0.0`、`numpy>=1.24.0`）
+2. [x] `scripts/wsd/setup.py`：一鍵建立 `.venv` 並安裝依賴（`npm run setup:wsd`）
+3. [x] `scripts/wsd/glossbert_wsd.py`：Python WSD 腳本；以 `AutoTokenizer(use_fast=False)` + `AutoModel` 載入 `BAAI/bge-base-en-v1.5`；BGE CLS token + L2 正規化；BGE query prefix 套用於 sentence 側；stdin JSON 陣列 → stdout JSON 陣列（`word, chosen_index, score`）
+4. [x] `src/csv/wsdClient.ts`：TypeScript → Python 橋接；`execFile` 呼叫 venv Python；失敗時 fallback 到 `chosenIndex: 0, score: 0`
+5. [x] `src/nlp/wsdShortdefsDb.ts`：MW shortdefs SQLite 快取（`wsd-shortdefs.db`，`better-sqlite3`）；key = word（不含 POS），一次存入所有 POS；`hashShortdefs()` 供版本失效偵測
+6. [x] `src/nlp/wordCache.ts`：新增 `getWsd` / `setWsd`；`fnv1a` 改為 `export`；`WsdCacheEntry` 含 `shortdefsHash`（取代舊 `shortdefsSnapshot`）；`getWsd` 遇到 score=0 或 hash 不符時回傳 null；`flush()` 支援 `wsd-cache.json` dirty flag
+7. [x] `src/csv/beginnerTranslator.ts`：`fetchBeginnerWordsMW` 新增 WSD 路徑（兩階段：Phase 1 查 shortdefsDb + WSD cache；Phase 2 批次呼叫 `batchWsd`）；score > 0 才寫入 WSD cache；`definition_en_source` 為 `'mw+wsd'`（改變選擇）或 `'mw'`（確認第一個即最佳）
+8. [x] `src/index.ts`：新增 `--wsd` CLI flag；`needsApiKey` 排除 `--wsd`；兩個 `fetchBeginnerWordsMW` call site 傳入 `{ wsd: !!options.wsd }`
+9. [x] 修復：`tokenizers` 0.20.x Rust `encode_batch` 型別驗證問題；改用 `use_fast=False`（Python slow tokenizer）；`requirements.txt` 從 `sentence-transformers` 改為 `transformers`
+10. [x] `package.json`：新增 `setup:wsd` script
+11. [x] `docs/USAGE.md`：新增 `--wsd` 選項說明、WSD 子章節（模型說明、設定步驟、快取表格）
+
+**備注**：
+- 兩層快取設計：`wsd-shortdefs.db`（word 為 key，跨書共用，減少 MW API 呼叫）+ `wsd-cache.json`（`word:pos::fnv1a(sentence)` 為 key，語境相依）
+- WSD Python 腳本使用 `from __future__ import annotations` 以相容 Python 3.8（`list[str]` 型別標注在 3.9+ 才原生支援）
+- `tokenizers` 0.20.x 與 `transformers` 4.46.x 的 `_batch_encode_plus` 有型別相容問題（`(str, None)` tuple 被 Rust `encode_batch` 拒絕）；`use_fast=False` 完全繞開 Rust 路徑，嵌入品質不變
+
+---
+
 ### [STEP-010] 字典 API 升級：Merriam-Webster 作為主要來源
 **狀態**：已完成
 **目標**：提升 `--deepl` 翻譯時英文定義的品質，以 MW Collegiate API（`shortdef` 欄位）取代 Wiktionary 資料，原 Free Dictionary API 降為 fallback。
