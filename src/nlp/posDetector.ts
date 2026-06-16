@@ -1,5 +1,6 @@
 import { tokenize } from './tokenizer';
 import { lemmatize } from './lemmatizer';
+import { batchDetectPos } from './spaCyPosClient';
 
 // compromise 對這些介詞無論語境都會標成 Adjective（已知錯誤）。
 // 偵測結果為 Adjective 時才覆寫；若 compromise 標出 Verb / Noun / Adverb 等，
@@ -25,4 +26,22 @@ export function detectPosFromSentence(lemma: string, sentence: string, fallback:
   const detected = match?.pos ?? fallback;
   if (detected === 'Adjective' && COMPROMISE_MISLABELS_AS_ADJ.has(lemma)) return 'Preposition';
   return detected;
+}
+
+/**
+ * 批次版本：優先用 spaCy 取詞性，spaCy 未安裝或找不到詞時退回 detectPosFromSentence。
+ * 回傳陣列與輸入 pairs 等長、同順序。
+ */
+export async function batchDetectPosFromSentences(
+  pairs: Array<{ lemma: string; sentence: string; fallback: string }>,
+): Promise<string[]> {
+  const spaCyResults = await batchDetectPos(
+    pairs.map(p => ({ word: p.lemma, sentence: p.sentence })),
+  );
+
+  return pairs.map((p, i) => {
+    const spaCyPos = spaCyResults[i]?.pos;
+    if (spaCyPos) return spaCyPos;
+    return detectPosFromSentence(p.lemma, p.sentence, p.fallback);
+  });
 }

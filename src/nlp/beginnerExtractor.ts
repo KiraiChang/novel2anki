@@ -5,7 +5,7 @@ import { applyBeginnerFilters, FilterOptions, FilterResult } from './beginnerFil
 import { rankByCoverage, CoverageRankResult } from './coverageRanker';
 import { selectBestSentence } from './sentenceScorer';
 import { generateCoverageReport, CoverageReport } from './coverageReport';
-import { detectPosFromSentence } from './posDetector';
+import { detectPosFromSentence, batchDetectPosFromSentences } from './posDetector';
 
 export { detectPosFromSentence };
 
@@ -22,11 +22,11 @@ export interface BeginnerExtractResult {
   rankResult: CoverageRankResult;
 }
 
-export function extractBeginnerVocab(
+export async function extractBeginnerVocab(
   chunks: Chunk[],
   bookTitle: string,
   options: BeginnerExtractOptions = {}
-): BeginnerExtractResult {
+): Promise<BeginnerExtractResult> {
   const { targetCoverage = 0.95, normalizeMap, onProgress, ...filterOptions } = options;
 
   const { freqMap, totalTokens } = buildGlobalFreqMap(chunks, { normalizeMap, onProgress });
@@ -44,13 +44,23 @@ export function extractBeginnerVocab(
 
   const rankResult = rankByCoverage(filterResult.kept, totalTokens, targetCoverage, baselineTokens);
 
+  // 先收集所有 (lemma, bestSentence)，批次呼叫 spaCy 一次取得詞性
+  const bestSentences = rankResult.rankedEntries.map(entry => selectBestSentence(entry));
+  const posList = await batchDetectPosFromSentences(
+    rankResult.rankedEntries.map((entry, i) => ({
+      lemma:    entry.lemma,
+      sentence: bestSentences[i].sentence,
+      fallback: entry.pos,
+    })),
+  );
+
   const tokens: WordToken[] = rankResult.rankedEntries.map((entry, i) => {
-    const best = selectBestSentence(entry);
+    const best = bestSentences[i];
     return {
       id: best.id,
       lemma: entry.lemma,
       original: entry.original,
-      pos: detectPosFromSentence(entry.lemma, best.sentence, entry.pos),
+      pos: posList[i],
       cefrLevel: entry.cefrLevel,
       globalFrequency: entry.globalCount,
       coverageRank: i + 1,

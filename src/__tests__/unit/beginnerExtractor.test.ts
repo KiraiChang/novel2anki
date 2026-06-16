@@ -1,4 +1,11 @@
-import { detectPosFromSentence } from '../../nlp/posDetector';
+jest.mock('../../nlp/spaCyPosClient');
+
+import { detectPosFromSentence, batchDetectPosFromSentences } from '../../nlp/posDetector';
+import { batchDetectPos } from '../../nlp/spaCyPosClient';
+
+const mockBatchDetectPos = batchDetectPos as jest.MockedFunction<typeof batchDetectPos>;
+
+beforeEach(() => jest.clearAllMocks());
 
 // ── detectPosFromSentence ─────────────────────────────────────────────────────
 
@@ -46,5 +53,57 @@ describe('detectPosFromSentence — 從例句取詞性', () => {
     const pos = detectPosFromSentence('across', 'He came across.', 'Adjective');
     // compromise 可能標 Adverb 或 Adjective；無論如何不應強制覆寫非 Adjective 的結果
     expect(pos).not.toBe('Adjective'); // 最差情況仍會被修正為 Preposition
+  });
+});
+
+// ── batchDetectPosFromSentences ───────────────────────────────────────────────
+
+describe('batchDetectPosFromSentences — spaCy 優先，失敗退回 compromise', () => {
+  it('spaCy 成功時直接使用其結果', async () => {
+    mockBatchDetectPos.mockResolvedValueOnce([
+      { word: 'against', pos: 'Preposition' },
+      { word: 'run',     pos: 'Verb' },
+    ]);
+    const result = await batchDetectPosFromSentences([
+      { lemma: 'against', sentence: 'She put her head against a wall.', fallback: 'Adjective' },
+      { lemma: 'run',     sentence: 'He runs fast.',                    fallback: 'Noun' },
+    ]);
+    expect(result).toEqual(['Preposition', 'Verb']);
+  });
+
+  it('spaCy 回傳空陣列時，退回 compromise + 誤標覆寫', async () => {
+    mockBatchDetectPos.mockResolvedValueOnce([]);
+    const result = await batchDetectPosFromSentences([
+      { lemma: 'against', sentence: 'She put her head against a wall.', fallback: 'Adjective' },
+    ]);
+    // spaCy 失敗 → compromise 標 Adjective → COMPROMISE_MISLABELS_AS_ADJ 覆寫為 Preposition
+    expect(result).toEqual(['Preposition']);
+  });
+
+  it('spaCy 部分詞 pos 為空字串時，對該詞退回 compromise', async () => {
+    mockBatchDetectPos.mockResolvedValueOnce([
+      { word: 'mountain', pos: 'Noun' },
+      { word: 'xyzzy',    pos: '' },      // 在例句中找不到
+    ]);
+    const result = await batchDetectPosFromSentences([
+      { lemma: 'mountain', sentence: 'They climbed the mountain.',  fallback: 'Verb' },
+      { lemma: 'xyzzy',    sentence: 'A strange word appeared.',    fallback: 'Noun' },
+    ]);
+    expect(result[0]).toBe('Noun');       // spaCy 結果
+    expect(result[1]).toBe('Noun');       // fallback
+  });
+
+  it('回傳陣列與輸入等長', async () => {
+    mockBatchDetectPos.mockResolvedValueOnce([
+      { word: 'deep', pos: 'Adjective' },
+      { word: 'fast', pos: 'Adjective' },
+      { word: 'run',  pos: 'Verb' },
+    ]);
+    const result = await batchDetectPosFromSentences([
+      { lemma: 'deep', sentence: 'The cave is deep.', fallback: 'Noun' },
+      { lemma: 'fast', sentence: 'She runs fast.',    fallback: 'Noun' },
+      { lemma: 'run',  sentence: 'He runs daily.',    fallback: 'Noun' },
+    ]);
+    expect(result).toHaveLength(3);
   });
 });

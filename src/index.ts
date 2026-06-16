@@ -804,7 +804,7 @@ program
       }
 
       process.stdout.write(chalk.yellow('\n正在分析全書詞彙覆蓋率（初學者模式）... 段落 0/' + chunks.length));
-      const result = extractBeginnerVocab(chunks, deckName, {
+      const result = await extractBeginnerVocab(chunks, deckName, {
         targetCoverage,
         minFreq,
         includeA1: options.beginnerIncludeA1 ?? false,
