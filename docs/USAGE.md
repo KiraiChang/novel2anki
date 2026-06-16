@@ -340,7 +340,11 @@ npm run setup:wsd
 # 在 scripts/wsd/.venv/ 建立 Python venv 並安裝 sentence-transformers
 ```
 
-> 首次執行時會自動下載 `all-MiniLM-L6-v2` 模型（~22 MB），存放於 `~/.cache/huggingface/`。
+> **模型**：預設使用 `BAAI/bge-base-en-v1.5`（110 MB，CPU 可跑）。首次執行時自動下載至 `~/.cache/huggingface/`。
+> 有 GPU 時，可將 `scripts/wsd/glossbert_wsd.py` 第 48 行改為：
+> ```python
+> MODEL_NAME = "BAAI/bge-large-en-v1.5"  # 335 MB，精度更高
+> ```
 
 **使用方式**
 
@@ -355,7 +359,14 @@ npx ts-node src/index.ts output/ -d "Novel" --wsd
 npx ts-node src/index.ts output/ -d "Novel" --mw --wsd --force
 ```
 
-WSD 結果快取於 `~/.novel2anki/wsd-cache.json`，key 包含語境句子 hash，同一單字在不同語境各自獨立。重複執行時命中快取自動跳過 Python 推論，無額外耗時。
+WSD 使用兩層快取，均存於 `~/.novel2anki/`：
+
+| 快取 | 格式 | Key | 跨書共用 |
+|------|------|-----|:---:|
+| `wsd-shortdefs.db` | SQLite | `word` | ✓ 同一單字只查一次 MW API |
+| `wsd-cache.json` | JSON | `word:pos::fnv1a(sentence)` | — 語境相依 |
+
+重複執行時兩層均自動命中跳過；Python 推論失敗（score = 0）時不寫入 `wsd-cache.json`，下次重跑仍會嘗試消歧。
 >
 > ```bash
 > # 強制重新翻譯單一 CSV（覆寫所有已有翻譯）
@@ -501,7 +512,8 @@ Azure 免費額度 2,000,000 字/月，5782 詞兩批合計約 46 萬字元，�
 | `cefr-wordlist.json` | CEFR 字庫（5,732 詞，A1–C2） | `scripts/build-cefr.js` 產生；若存在則優先讀此處 |
 | `phrase-list.json` | 學術／常見片語庫（1,409 條，含 OPAL / OPL 來源） | `scripts/extract-phrase-lists.py` 產生；若存在則優先讀此處 |
 | `phrase-cache.json` | MW 片語定義快取（命中與 no-def 均存） | `--prefetch-phrases` 建立；存在時自動跳過已查詢的片語 |
-| `wsd-cache.json` | WSD 語意消歧結果快取（key = `word:pos::fnv1a(sentence)`） | `--wsd` 時自動存入；key 含語境 hash，不同語境各自獨立 |
+| `wsd-shortdefs.db` | MW shortdefs SQLite 快取（key = word，跨書共用）；存所有 POS 的原始 shortdefs，排序讀取時依 POS 動態套用 | `--wsd` 時自動存入；同一單字跨書只查一次 MW API |
+| `wsd-cache.json` | WSD 語意消歧結果快取（key = `word:pos::fnv1a(sentence)`，含 shortdefsHash 做 MW 版本失效偵測） | `--wsd` 時自動存入；Python 推論成功（score > 0）才寫入 |
 
 ## 例句翻譯快取（`--fill-sent-zh`）
 

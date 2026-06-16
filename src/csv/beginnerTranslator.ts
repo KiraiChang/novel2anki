@@ -4,6 +4,7 @@ import { buildProperNounSet, protectNames, restoreNames } from '../nlp/nameProte
 import { getWordCache, DefinitionLayerCache } from '../nlp/wordCache';
 import { applyNormalization } from '../nlp/tokenNormalizer';
 import { batchWsd, WsdRequest } from './wsdClient';
+import { getWsdShortdefsDb, hashShortdefs, ShortdefEntry } from '../nlp/wsdShortdefsDb';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -364,10 +365,17 @@ export async function fetchBeginnerWordsMW(
     const wordCache = getWordCache();
 
     // (rowIdx, 候選詞義列表, context sentence)
-    type WsdItem = { rowIdx: number; lemma: string; pos: string; sentence: string; candidates: Array<{ fl: string; shortdef: string }> };
+    type WsdItem = { rowIdx: number; lemma: string; pos: string; sentence: string; candidates: ShortdefEntry[] };
     const wsdPending: WsdItem[] = [];
+    const shortdefsDb = getWsdShortdefsDb();
 
-    // Phase 1：為每個詞取全部 shortdefs（或 fallback 到單一定義）
+    // POS 匹配的 entry 排前面（讀取 SQLite 後套用，讓跨書複用同一份原始資料）
+    const applyPosOrder = (entries: ShortdefEntry[], targetPOS: string | null): ShortdefEntry[] =>
+      targetPOS
+        ? [...entries.filter(e => e.fl === targetPOS), ...entries.filter(e => e.fl !== targetPOS)]
+        : entries;
+
+    // Phase 1：為每個詞取全部 shortdefs（SQLite → MW API → fallback）
     for (let j = 0; j < needFetch.length; j++) {
       const { i, cols } = needFetch[j];
       const lemma    = get(cols, 'lemma');
@@ -377,8 +385,8 @@ export async function fetchBeginnerWordsMW(
 
       onProgress?.(j + 1, needFetch.length, { word: lemma });
 
-      // 無 MW key 或無語境句子：直接走單一定義路徑
-      if (!mwKey || !sentence) {
+      // 無語境句子：直接走單一定義路徑（WSD 無意義）
+      if (!sentence) {
         const { def, source } = await fetchEnglishDefinition(lemma, pos);
         const srcStr = source === 'MW' ? 'mw' : source === 'cached' ? 'cache' : source;
         while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
@@ -387,12 +395,22 @@ export async function fetchBeginnerWordsMW(
         continue;
       }
 
-      let candidates: Array<{ fl: string; shortdef: string }> | null = null;
-      try {
-        candidates = await fetchAllShortdefsFromMW(lemma, targetPOS, mwKey);
-      } catch { /* fallthrough */ }
+      // 先查 SQLite shortdefs 快取（跨書共用，不打 MW API）
+      let rawEntries = shortdefsDb.get(lemma);
 
-      // MW 無結果或只有一個候選：直接用 fetchEnglishDefinition
+      // SQLite 未命中且有 MW key：查 MW 並寫入 SQLite
+      if (!rawEntries && mwKey) {
+        try {
+          // targetPOS=null 取回 MW 原始全部 entry，排序留給 applyPosOrder
+          rawEntries = await fetchAllShortdefsFromMW(lemma, null, mwKey);
+          if (rawEntries) shortdefsDb.set(lemma, rawEntries);
+        } catch { /* fallthrough */ }
+      }
+
+      // 套用 POS 排序
+      const candidates = rawEntries ? applyPosOrder(rawEntries, targetPOS) : null;
+
+      // 無結果或只有一個候選：直接用 fetchEnglishDefinition
       if (!candidates || candidates.length <= 1) {
         const def = candidates?.[0] ? `(${candidates[0].fl}) ${candidates[0].shortdef}` : null;
         if (def) {
@@ -410,11 +428,11 @@ export async function fetchBeginnerWordsMW(
         continue;
       }
 
-      // 多候選：先查 WSD 快取
-      const shortdefTexts = candidates.map(c => c.shortdef);
-      const cached = wordCache.getWsd(lemma, pos, sentence, shortdefTexts);
-      if (cached) {
-        const chosen = candidates[cached.chosenIndex] ?? candidates[0];
+      // 多候選：先查 WSD 快取（以 hash 做 MW 版本失效偵測）
+      const candidatesHash = hashShortdefs(candidates);
+      const cachedWsd = wordCache.getWsd(lemma, pos, sentence, candidatesHash);
+      if (cachedWsd) {
+        const chosen = candidates[cachedWsd.chosenIndex] ?? candidates[0];
         const def = `(${chosen.fl}) ${chosen.shortdef}`;
         while (rows[i].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[i].push('');
         rows[i][defEnColIdx]    = def;
@@ -447,7 +465,10 @@ export async function fetchBeginnerWordsMW(
         if (chosenIdx !== 0) wsdChanged++;
 
         wordCache.setCache(item.lemma, item.pos, def, 'MW');
-        wordCache.setWsd(item.lemma, item.pos, item.sentence, chosenIdx, score, item.candidates.map(c => c.shortdef));
+        // score === 0 代表 Python fallback，不快取，讓下次重跑時重新消歧
+        if (score > 0) {
+          wordCache.setWsd(item.lemma, item.pos, item.sentence, chosenIdx, score, hashShortdefs(item.candidates));
+        }
 
         while (rows[item.rowIdx].length <= Math.max(defEnColIdx, defEnSrcColIdx)) rows[item.rowIdx].push('');
         rows[item.rowIdx][defEnColIdx]    = def;

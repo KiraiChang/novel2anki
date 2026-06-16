@@ -5,9 +5,18 @@ WSD（Word Sense Disambiguation）腳本：從 MW shortdefs 中選出最符合�
 使用 sentence-transformers 計算 context_sentence 與每個 shortdef 的 cosine similarity，
 選出分數最高的 shortdef index。
 
-升級路徑：
-  PoC 模型  — sentence-transformers all-MiniLM-L6-v2（22MB，CPU 可跑）
-  生產模型  — IDEA-CCNL/Erlangshen-GlossBERT-WSD（真正的 GlossBERT，效果更好）
+模型選擇：
+  CPU（預設）— BAAI/bge-base-en-v1.5（110 MB）
+  GPU        — 將 MODEL_NAME 改為 BAAI/bge-large-en-v1.5（335 MB，精度更高）
+
+  bge 系列針對非對稱語意相似度訓練（query vs passage），適合本專案的
+  (context_sentence, MW shortdef) 配對場景。encode 時 sentence 使用
+  "Represent this sentence for searching relevant passages: " 前綴，
+  shortdef 不加前綴，符合 bge 官方建議的 asymmetric retrieval 用法。
+
+  升級路徑（日後如需 WSD 專屬訓練）：
+    liyucheng259/GlossBERT — 以 SemCor + WordNet 訓練的 BERT 二元分類模型，
+    需改寫推論邏輯（(sentence+gloss) → classification score，非 cosine-sim）。
 
 環境設定（venv，請在 scripts/wsd/ 目錄下執行）：
   python -m venv .venv
@@ -30,19 +39,20 @@ stdout: JSON 陣列，每項 { word, chosen_index, score }
 stderr: 進度資訊
 """
 
+import os
 import sys
 import json
 import numpy as np
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+# Windows 不支援 symlink，suppresses HuggingFace 快取警告（不影響功能）
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+# CPU 建議：bge-base-en-v1.5（110 MB）
+# GPU 建議：bge-large-en-v1.5（335 MB，精度更高）
+MODEL_NAME = "BAAI/bge-base-en-v1.5"
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
+# bge 非對稱 retrieval 前綴：sentence 加，shortdef 不加
+BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 
 def main() -> None:
@@ -76,40 +86,49 @@ def main() -> None:
 
     print(f"[WSD] Model loaded. Processing {len(requests)} items...", file=sys.stderr)
 
-    # 收集所有待 encode 的文字（sentence + 所有 shortdefs）
-    # 批次 encode 提升效率
-    all_texts: list[str] = []
+    # bge asymmetric retrieval：sentence 加前綴，shortdef 不加
+    # 分開 encode 讓前綴只套用在 sentence 側
+    sentences = [BGE_QUERY_PREFIX + (req.get("sentence") or "") for req in requests]
+    all_shortdefs: list[str] = []
+    shortdef_counts: list[int] = []
     for req in requests:
-        sentence = req.get("sentence", "")
-        shortdefs = req.get("shortdefs", [])
-        all_texts.append(sentence)
-        all_texts.extend(shortdefs)
+        defs = req.get("shortdefs") or []
+        # 過濾掉 None / 非字串，避免 tokenizer TypeError
+        clean = [str(d) for d in defs if d is not None and str(d).strip()]
+        all_shortdefs.extend(clean)
+        shortdef_counts.append(len(clean))
 
-    embeddings = model.encode(all_texts, show_progress_bar=False, batch_size=64)
+    sentence_embeddings = model.encode(sentences, show_progress_bar=False, batch_size=64, normalize_embeddings=True)
+    # all_shortdefs 為空時（所有詞均無有效 shortdef）直接跳過 encode
+    gloss_embeddings = (
+        model.encode(all_shortdefs, show_progress_bar=False, batch_size=64, normalize_embeddings=True)
+        if all_shortdefs else []
+    )
 
     results = []
-    ptr = 0
-    for req in requests:
+    gloss_ptr = 0
+    for i, req in enumerate(requests):
         word = req.get("word", "")
-        shortdefs = req.get("shortdefs", [])
+        n = shortdef_counts[i]
 
-        sentence_emb = embeddings[ptr]
-        ptr += 1
-
-        if not shortdefs:
+        if n == 0:
             results.append({"word": word, "chosen_index": 0, "score": 0.0})
             continue
 
+        sent_emb = sentence_embeddings[i]
         best_idx = 0
         best_score = -1.0
-        for i, _ in enumerate(shortdefs):
-            gloss_emb = embeddings[ptr + i]
-            score = cosine_similarity(sentence_emb, gloss_emb)
+        for j in range(n):
+            g = gloss_embeddings[gloss_ptr + j]
+            if g is None:
+                continue
+            # normalize_embeddings=True 後 dot product 等同 cosine similarity
+            score = float(np.dot(sent_emb, g))
             if score > best_score:
                 best_score = score
-                best_idx = i
+                best_idx = j
 
-        ptr += len(shortdefs)
+        gloss_ptr += n
         results.append({"word": word, "chosen_index": best_idx, "score": round(best_score, 4)})
 
     print(f"[WSD] Done. Changed {sum(1 for r in results if r['chosen_index'] != 0)} / {len(results)} selections.", file=sys.stderr)

@@ -33,17 +33,18 @@ interface PhraseCacheEntry { def: string; source: string; }
 type PhraseCacheData = Record<string, PhraseCacheEntry>;
 
 // wsd-cache.json：WSD 詞義消歧快取，key = word:pos::fnv1a(sentence)
+// shortdefs 本體移至 wsd-shortdefs.db（SQLite），此處只存 hash 供失效偵測
 interface WsdCacheEntry {
   chosenIndex: number;
   score: number;
-  shortdefsSnapshot: string[]; // MW shortdefs 快照，用於偵測 MW 更新導致 index 失效
+  shortdefsHash: string; // fnv1a(shortdefs.join('|'))，MW 改版時自動失效
 }
 type WsdCacheData = Record<string, WsdCacheEntry>;
 
 export type CacheTier = 'dict' | 'cache';
 
 /** FNV-1a 32-bit hash → 8-char hex（效能優先，不用於密碼學） */
-function fnv1a(str: string): string {
+export function fnv1a(str: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
@@ -331,21 +332,22 @@ export class WordCacheManager {
   }
 
   /**
-   * 查找 WSD 快取。若 shortdefsSnapshot 與當前 shortdefs 不一致（MW 更新），視為快取失效。
+   * 查找 WSD 快取。shortdefsHash 不符代表 MW 已更新候選詞義，視為失效。
    * 回傳 null 表示未快取或快取失效。
    */
-  getWsd(word: string, pos: string | null, sentence: string, currentShortdefs: string[]): { chosenIndex: number; score: number } | null {
+  getWsd(word: string, pos: string | null, sentence: string, currentShortdefsHash: string): { chosenIndex: number; score: number } | null {
     const entry = this.wsdCache[this.wsdKey(word, pos, sentence)];
     if (!entry) return null;
-    // shortdefsSnapshot 長度或內容不同 → MW 已更新，快取失效
-    if (entry.shortdefsSnapshot.length !== currentShortdefs.length) return null;
-    if (!entry.shortdefsSnapshot.every((s, i) => s === currentShortdefs[i])) return null;
+    // score === 0 為舊版 fallback 殘留，視為失效讓 WSD 重跑
+    if (entry.score === 0) return null;
+    // hash 不符 → MW 已更新 shortdefs，重跑 WSD
+    if (entry.shortdefsHash !== currentShortdefsHash) return null;
     return { chosenIndex: entry.chosenIndex, score: entry.score };
   }
 
   /** 寫入 WSD 快取（in-memory，呼叫 flush() 才落盤） */
-  setWsd(word: string, pos: string | null, sentence: string, chosenIndex: number, score: number, shortdefsSnapshot: string[]): void {
-    this.wsdCache[this.wsdKey(word, pos, sentence)] = { chosenIndex, score, shortdefsSnapshot };
+  setWsd(word: string, pos: string | null, sentence: string, chosenIndex: number, score: number, shortdefsHash: string): void {
+    this.wsdCache[this.wsdKey(word, pos, sentence)] = { chosenIndex, score, shortdefsHash };
     this.wsdCacheDirty = true;
   }
 
