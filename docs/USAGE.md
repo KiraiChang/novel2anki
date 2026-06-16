@@ -58,6 +58,10 @@ npx ts-node src/index.ts <輸入> [選項]
                           （例：--fill-def-zh=fantasy 或 --fill-def-zh=fantasy,the-demon-awakens）
                           未指定時只同步全局快取（zh: word-cache-zh.json；en: word-cache.json）
                           CEFR 已知詞才寫入 global；UNKNOWN 詞寫入 domain/book 分層快取
+  --csv-to-def-db         將 CSV 已有翻譯寫入 word-def.db（definition_zh 非空才寫入；key 已存在則跳過）
+                          key = word:pos::fnv1a(definition_en)；同時寫入 definition_zh_source
+  --def-db-to-csv         從 word-def.db 補填 CSV 中空白的 definition_zh 與 definition_zh_source
+                          有 definition_en 且 definition_zh 為空的列才查詢；有補填才重寫 CSV
 ```
 
 ## 使用範例
@@ -514,6 +518,7 @@ Azure 免費額度 2,000,000 字/月，5782 詞兩批合計約 46 萬字元，�
 | `phrase-cache.json` | MW 片語定義快取（命中與 no-def 均存） | `--prefetch-phrases` 建立；存在時自動跳過已查詢的片語 |
 | `wsd-shortdefs.db` | MW shortdefs SQLite 快取（key = word，跨書共用）；存所有 POS 的原始 shortdefs，排序讀取時依 POS 動態套用 | `--wsd` 時自動存入；同一單字跨書只查一次 MW API |
 | `wsd-cache.json` | WSD 語意消歧結果快取（key = `word:pos::fnv1a(sentence)`，含 shortdefsHash 做 MW 版本失效偵測） | `--wsd` 時自動存入；Python 推論成功（score > 0）才寫入 |
+| `word-def.db` | MW 英文定義與中文翻譯的跨書 SQLite 快取；key = `word:pos::fnv1a(definition_en)`（hash 英文定義）；schema：`key / en / zh / source` | `--csv-to-def-db` 寫入；相同 MW 定義跨書共用同一翻譯 |
 
 ## 例句翻譯快取（`--fill-sent-zh`）
 

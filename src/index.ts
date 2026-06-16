@@ -27,6 +27,7 @@ import { findNormalizeFile, loadNormalizeFile, slugFromCsvPath } from './nlp/tok
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, pushCsvToCache, pushSentCacheFromCsv, FillDefZhConfig } from './csv/beginnerTranslator';
+import { syncCsvToWordDefDb, syncWordDefDbToCsv } from './csv/wordDefDbSync';
 import { getWordCache } from './nlp/wordCache';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
 import * as fs from 'fs';
@@ -82,6 +83,8 @@ program
   .option('--prefetch-phrases', '批次預查片語庫所有片語的 MW 英文定義並存入 phrase-cache.json（需設定 MW_API_KEY；已查過的片語自動跳過，可中斷重跑）')
   .option('--clean-pos-cache', '清除 word-cache.json 與 word-cache-zh.json 中所有 POS-specific 條目（word:pos），保留 base key。修復複合詞覆寫問題後重建用。')
   .option('--clean-zh-base', '清除 word-cache-zh.json 中所有 base 條目（word，無 POS），保留 POS key。重建中文翻譯前清除汙染 base key 用。')
+  .option('--csv-to-def-db', '將 CSV 的 definition_en / definition_zh 寫入 word-def.db（SQLite 定義快取；key 已存在則跳過）')
+  .option('--def-db-to-csv', '從 word-def.db 補填 CSV 中空白的 definition_zh（key = word:pos::fnv1a(definition_en)）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -113,8 +116,10 @@ program
     prefetchPhrases?: boolean;
     cleanPosCache?: boolean;
     cleanZhBase?: boolean;
+    csvToDefDb?: boolean;
+    defDbToCsv?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.wsd && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase;
+    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.wsd && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase && !options.csvToDefDb && !options.defDbToCsv;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --translate / --translate-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -374,6 +379,48 @@ program
       // 目錄中可能同時含有 tokens.csv，過濾出 words 類型即可
       const beginnerWordsCsvs = csvPaths.filter(p => isBeginnerWordsCsv(p));
       if (beginnerWordsCsvs.length > 0) {
+        // CSV → word-def.db
+        if (options.csvToDefDb) {
+          console.log('');
+          console.log(chalk.cyan(`CSV → word-def.db（definition 快取）`));
+          let totalSaved = 0;
+          let totalSkipped = 0;
+          for (const csvPath of beginnerWordsCsvs) {
+            process.stdout.write(chalk.yellow(`正在處理 ${path.basename(csvPath)}...\n`));
+            const result = syncCsvToWordDefDb(csvPath, (cur, total) => {
+              process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})   `);
+            });
+            process.stdout.write(`\r${chalk.green(`  ✓ 寫入 ${result.saved} 筆 | 跳過 ${result.skipped} 筆`)}\n`);
+            totalSaved    += result.saved;
+            totalSkipped  += result.skipped;
+          }
+          console.log('');
+          console.log(chalk.green(`完成：共寫入 ${totalSaved} 筆 | 跳過（已有或空白） ${totalSkipped} 筆`));
+          return;
+        }
+
+        // word-def.db → CSV（補填空白 definition_zh）
+        if (options.defDbToCsv) {
+          console.log('');
+          console.log(chalk.cyan(`word-def.db → CSV（補填 definition_zh）`));
+          let totalFilled    = 0;
+          let totalNoMatch   = 0;
+          let totalUnchanged = 0;
+          for (const csvPath of beginnerWordsCsvs) {
+            process.stdout.write(chalk.yellow(`正在處理 ${path.basename(csvPath)}...\n`));
+            const result = syncWordDefDbToCsv(csvPath, (cur, total) => {
+              process.stdout.write(`\r  ${String(Math.round(cur / total * 100)).padStart(3)}% (${cur}/${total})   `);
+            });
+            process.stdout.write(`\r${chalk.green(`  ✓ 補填 ${result.filled} 筆 | 無 key ${result.noMatch} 筆 | 已有或跳過 ${result.unchanged} 筆`)}\n`);
+            totalFilled    += result.filled;
+            totalNoMatch   += result.noMatch;
+            totalUnchanged += result.unchanged;
+          }
+          console.log('');
+          console.log(chalk.green(`完成：共補填 ${totalFilled} 筆 | 無 key ${totalNoMatch} 筆 | 已有或跳過 ${totalUnchanged} 筆`));
+          return;
+        }
+
         // 個人單字庫升級：把 CSV 的 definition_en 升級到 word-dict.json
         if (options.updateDict) {
           const wc = getWordCache();
