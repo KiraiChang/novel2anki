@@ -5,6 +5,9 @@ import { applyBeginnerFilters, FilterOptions, FilterResult } from './beginnerFil
 import { rankByCoverage, CoverageRankResult } from './coverageRanker';
 import { selectBestSentence } from './sentenceScorer';
 import { generateCoverageReport, CoverageReport } from './coverageReport';
+import { detectPosFromSentence } from './posDetector';
+
+export { detectPosFromSentence };
 
 export interface BeginnerExtractOptions extends FilterOptions {
   targetCoverage?: number;
@@ -47,7 +50,7 @@ export function extractBeginnerVocab(
       id: best.id,
       lemma: entry.lemma,
       original: entry.original,
-      pos: entry.pos,
+      pos: detectPosFromSentence(entry.lemma, best.sentence, entry.pos),
       cefrLevel: entry.cefrLevel,
       globalFrequency: entry.globalCount,
       coverageRank: i + 1,
