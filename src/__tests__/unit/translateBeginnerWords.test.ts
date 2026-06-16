@@ -1,6 +1,10 @@
 jest.mock('../../nlp/wordCache');
 jest.mock('../../cards/translator');
 jest.mock('../../nlp/nameProtector');
+jest.mock('../../nlp/wordDefDb', () => {
+  const mockSet = jest.fn().mockReturnValue(true);
+  return { getWordDefDb: jest.fn(() => ({ set: mockSet })), __mockSet: mockSet };
+});
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -87,6 +91,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  jest.restoreAllMocks();
 });
 
 // ── source 欄自動插入（舊格式 CSV） ───────────────────────────────────────────
@@ -202,6 +207,93 @@ describe('translateBeginnerWordsCsv — source written after translation', () =>
     const sentSrcIdx = headers.indexOf('context_sentence_zh_source');
     expect(rows[0][defSrcIdx]).toBe('deepl');
     expect(rows[0][sentSrcIdx]).toBe('deepl');
+  });
+});
+
+// ── word-def.db 同步 ─────────────────────────────────────────────────────────
+
+// 完整 14 欄標頭（含 word_zh / word_zh_source），與 beginnerExporter 保持一致
+const FULL_HEADERS = '"lemma","pos","cefr_level","coverage_rank","global_frequency","definition_en","definition_en_source","context_sentence","context_sentence_zh","context_sentence_zh_source","definition_zh","definition_zh_source","word_zh","word_zh_source"';
+
+function fullRow(fields: {
+  lemma: string; pos: string; defEn?: string; defEnSrc?: string;
+  sentence?: string; sentZh?: string; sentZhSrc?: string;
+  defZh?: string; defZhSrc?: string; wordZh?: string; wordZhSrc?: string;
+}): string {
+  return [
+    fields.lemma, fields.pos, 'B1', '1', '100',
+    fields.defEn ?? '', fields.defEnSrc ?? '',
+    fields.sentence ?? '', fields.sentZh ?? '', fields.sentZhSrc ?? '',
+    fields.defZh ?? '', fields.defZhSrc ?? '',
+    fields.wordZh ?? '', fields.wordZhSrc ?? '',
+  ].map(v => `"${v.replace(/"/g, '""')}"`).join(',');
+}
+
+function writeFullCsv(dir: string, name: string, rows: string[]): string {
+  const csvPath = path.join(dir, name);
+  fs.writeFileSync(csvPath, [FULL_HEADERS, ...rows].join('\n'), 'utf-8');
+  return csvPath;
+}
+
+describe('translateBeginnerWordsCsv — word-def.db sync', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { __mockSet } = require('../../nlp/wordDefDb');
+  const mockWordDefSet: jest.Mock = __mockSet;
+
+  beforeEach(() => mockWordDefSet.mockClear());
+
+  it('翻譯完成後 db.set 以 lemma/pos/defEn/defZh/source 被呼叫', async () => {
+    // Phase 2（def + sent）= 2 筆；Phase 2.5（word_zh）= 1 筆
+    (batchTranslate as jest.Mock)
+      .mockResolvedValueOnce(['中文定義', '例句中文'])
+      .mockResolvedValueOnce(['銀行']);
+    const csvPath = writeFullCsv(tmpDir, 'words.csv', [
+      fullRow({ lemma: 'bank', pos: 'Noun', defEn: 'a financial institution', sentence: 'She went to the bank.' }),
+    ]);
+    await translateBeginnerWordsCsv(csvPath, CONFIG);
+    expect(mockWordDefSet).toHaveBeenCalledWith(
+      'bank', 'Noun', 'a financial institution', '中文定義', 'deepl',
+    );
+  });
+
+  it('Phase 1 無字典結果退回 fallback（單詞本身）時，不呼叫 db.set', async () => {
+    // mock fetch 失敗封鎖 Free Dictionary → fallback: def = 'ghost'（單詞本身）
+    jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('network error'));
+    (batchTranslate as jest.Mock)
+      .mockResolvedValueOnce(['中文定義', '例句中文'])
+      .mockResolvedValueOnce(['鬼魂']);
+    const csvPath = writeFullCsv(tmpDir, 'words.csv', [
+      fullRow({ lemma: 'ghost', pos: 'Noun', defEn: '', sentence: 'The ghost appeared.' }),
+    ]);
+    await translateBeginnerWordsCsv(csvPath, CONFIG);
+    expect(mockWordDefSet).not.toHaveBeenCalled();
+  });
+
+  it('翻譯結果 definition_zh 為空字串時不呼叫 db.set', async () => {
+    // Phase 2：defZh = '' → db.set 不應被呼叫
+    (batchTranslate as jest.Mock)
+      .mockResolvedValueOnce(['', '例句中文'])
+      .mockResolvedValueOnce(['奔跑']);
+    const csvPath = writeFullCsv(tmpDir, 'words.csv', [
+      fullRow({ lemma: 'run', pos: 'Verb', defEn: 'to move fast', sentence: 'He runs fast.' }),
+    ]);
+    await translateBeginnerWordsCsv(csvPath, CONFIG);
+    expect(mockWordDefSet).not.toHaveBeenCalled();
+  });
+
+  it('CSV 四欄皆已填入時跳過翻譯，不呼叫 db.set', async () => {
+    (batchTranslate as jest.Mock).mockResolvedValue([]);
+    const csvPath = writeFullCsv(tmpDir, 'words.csv', [
+      fullRow({
+        lemma: 'run', pos: 'Verb',
+        defEn: 'to move fast', defEnSrc: 'mw',
+        sentence: 'He runs fast.', sentZh: '他快速跑。', sentZhSrc: 'deepl',
+        defZh: '奔跑', defZhSrc: 'deepl',
+        wordZh: '跑', wordZhSrc: 'deepl',
+      }),
+    ]);
+    await translateBeginnerWordsCsv(csvPath, CONFIG);
+    expect(mockWordDefSet).not.toHaveBeenCalled();
   });
 });
 

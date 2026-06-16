@@ -5,6 +5,7 @@ import { getWordCache, DefinitionLayerCache } from '../nlp/wordCache';
 import { applyNormalization } from '../nlp/tokenNormalizer';
 import { batchWsd, WsdRequest } from './wsdClient';
 import { getWsdShortdefsDb, hashShortdefs, ShortdefEntry } from '../nlp/wsdShortdefsDb';
+import { getWordDefDb } from '../nlp/wordDefDb';
 
 const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
@@ -778,6 +779,22 @@ export async function translateBeginnerWordsCsv(
     const zhSent = sentZh[j];
     if (enSent && zhSent) wc.setSentenceZh(enSent, zhSent, config.provider);
   });
+
+  // 同步寫入 word-def.db（definition_en 與 definition_zh 皆非空才寫）
+  // fallback source（無真實字典定義，以單詞本身補位）時不寫入，避免儲存無意義的鍵值
+  if (defEnColIdx !== undefined && defZhColIdx !== undefined) {
+    const wordDefDb = getWordDefDb();
+    const srcColIdx = defZhSrcColIdx;
+    needTranslation.forEach(({ i, cols }, j) => {
+      if (englishDefSources[j] === 'fallback') return;
+      const lemma = get(cols, 'lemma').trim();
+      const pos   = get(cols, 'pos').trim();
+      const en    = (rows[i][defEnColIdx] ?? '').trim();
+      const zh    = (rows[i][defZhColIdx] ?? '').trim();
+      const src   = srcColIdx !== undefined ? (rows[i][srcColIdx] ?? '').trim() : provider;
+      if (lemma && pos && en && zh) wordDefDb.set(lemma, pos, en, zh, src);
+    });
+  }
 
   // 寫回檔案
   const headerLine = headers.map(escapeField).join(',');
