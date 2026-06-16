@@ -92,8 +92,15 @@ function normalizePOS(pos: string): string | null {
 // ── Merriam-Webster Collegiate API ───────────────────────────────────────────
 
 interface MWEntry {
-  fl?: string;        // functional label（詞性），如 "noun" / "verb"
-  shortdef?: string[]; // 簡短定義列表
+  meta?: { id?: string };  // MW entry id，如 "against" / "back:1"（用於過濾非查詢詞的 entry）
+  fl?: string;             // functional label（詞性），如 "noun" / "verb"
+  shortdef?: string[];     // 簡短定義列表
+}
+
+/** MW meta.id 可能帶 ":N" 同形詞後綴，只比較冒號前的部分 */
+function isSameWord(metaId: string | undefined, word: string): boolean {
+  if (!metaId) return true; // 無 id 欄位時保守接受
+  return metaId.toLowerCase().split(':')[0] === word.toLowerCase();
 }
 
 // 排除交叉參照類短句（MW shortdef 通常已乾淨，但保留保護）
@@ -115,8 +122,13 @@ async function fetchDefinitionFromMW(
   }
   const raw = await res.json() as (MWEntry | string)[];
 
-  // MW 找不到詞時回傳建議字串陣列，過濾掉
-  const entries = raw.filter((e): e is MWEntry => typeof e === 'object' && Array.isArray(e.shortdef) && e.shortdef.length > 0);
+  // MW 找不到詞時回傳建議字串陣列；meta.id 不符的 entry 屬於其他詞，一併過濾
+  const entries = raw.filter((e): e is MWEntry =>
+    typeof e === 'object' &&
+    Array.isArray(e.shortdef) &&
+    e.shortdef.length > 0 &&
+    isSameWord(e.meta?.id, word),
+  );
   if (entries.length === 0) return null;
 
   // 優先找符合 POS 的 entry
@@ -150,7 +162,13 @@ async function fetchAllShortdefsFromMW(
   );
   if (!res.ok) return null;
   const raw = await res.json() as (MWEntry | string)[];
-  const entries = raw.filter((e): e is MWEntry => typeof e === 'object' && Array.isArray(e.shortdef) && e.shortdef.length > 0);
+  // meta.id 不符的 entry 屬於其他詞（MW 同一回應可能混入多詞），過濾掉
+  const entries = raw.filter((e): e is MWEntry =>
+    typeof e === 'object' &&
+    Array.isArray(e.shortdef) &&
+    e.shortdef.length > 0 &&
+    isSameWord(e.meta?.id, word),
+  );
   if (entries.length === 0) return null;
 
   // POS 匹配的 entry 排前面

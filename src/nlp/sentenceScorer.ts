@@ -14,6 +14,9 @@ const SPEECH_VERBS = /\b(said|says|asked|asks|replied|answered|shouted|whispered
 // 代詞開頭 → 句子依賴前文才能知道指涉對象，離開原書無法獨立理解
 const ANAPHORIC_PRONOUN = /^(He|She|They|His|Her|Their)\b/;
 
+// 字典定義格式開頭 → 書中字彙表或注解，不適合作為語境例句
+const DICT_DEFINITION = /^\((noun|verb|adjective|adverb|preposition|pronoun|conjunction|interjection|adj|adv|prep|conj|n|v)\)\s/i;
+
 // 對話偵測：以引號 / em dash 開頭，或超過 55% 字元在引號內
 function isMainlyDialogue(s: string): boolean {
   if (/^["“‘]/.test(s)) return true;
@@ -63,6 +66,9 @@ function scoreSentence(sentence: string, targetLemma: string, targetOriginal: st
 
   // 代詞開頭懲罰：He/She/They 需要前文才知道指涉對象
   if (ANAPHORIC_PRONOUN.test(s)) score -= 2;
+
+  // 字典定義格式懲罰：(noun) / (verb) 開頭是字彙表，不是語境句
+  if (DICT_DEFINITION.test(s)) score -= 10;
 
   return score;
 }
