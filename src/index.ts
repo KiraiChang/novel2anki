@@ -27,6 +27,7 @@ import { findNormalizeFile, loadNormalizeFile, slugFromCsvPath } from './nlp/tok
 import { loadNamesFile } from './nlp/nameProtector';
 import { importBeginnerTokens, mergeTokensToVocabCards, isBeginnerCsv, isBeginnerWordsCsv, importBeginnerWords, importBeginnerWordsFromFiles, computeBeginnerWordStats } from './csv/beginnerImporter';
 import { estimateBeginnerTranslate, formatBeginnerTranslateEstimate, translateBeginnerWordsCsv, fetchBeginnerWordsMW, estimateMWFetch, updateWordDictFromCsv, syncSentenceCacheWithCsv, syncDefinitionCacheWithCsv, pushCsvToCache, pushSentCacheFromCsv, FillDefZhConfig } from './csv/beginnerTranslator';
+import { downloadBeginnerAudio, getDefaultAudioDir } from './csv/audioDownloader';
 import { syncCsvToWordDefDb, syncWordDefDbToCsv } from './csv/wordDefDbSync';
 import { getWordCache } from './nlp/wordCache';
 import { prefetchCefrToWordCache, prefetchCefrZhToWordCache, prefetchPhrasesToCache } from './nlp/cefrPrefetcher';
@@ -85,6 +86,7 @@ program
   .option('--clean-zh-base', '清除 word-cache-zh.json 中所有 base 條目（word，無 POS），保留 POS key。重建中文翻譯前清除汙染 base key 用。')
   .option('--csv-to-def-db', '將 CSV 的 definition_en / definition_zh 寫入 word-def.db（SQLite 定義快取；key 已存在則跳過）')
   .option('--def-db-to-csv', '從 word-def.db 補填 CSV 中空白的 definition_zh（key = word:pos::fnv1a(definition_en)）')
+  .option('--download-audio', '從 word-audio.db 下載 MP3 發音檔到 WORD_CACHE_PATH/audio/（需先執行 --mw 建立音訊 URL）')
   .action(async (pdfFile: string, options: { // pdfFile = general input file (pdf, epub, csv or directory)
     deck?: string;
     types: string;
@@ -118,8 +120,9 @@ program
     cleanZhBase?: boolean;
     csvToDefDb?: boolean;
     defDbToCsv?: boolean;
+    downloadAudio?: boolean;
   }) => {
-    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.wsd && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase && !options.csvToDefDb && !options.defDbToCsv;
+    const needsApiKey = !options.mock && !options.offline && !options.translate && !options.translateForce && !options.mw && !options.wsd && !options.updateDict && !options.fillSentZh && !options.fillDefZh && !options.pushCache && !options.pushSentCache && !options.prefetchCefr && !options.prefetchCefrZh && !options.prefetchPhrases && !options.cleanPosCache && !options.cleanZhBase && !options.csvToDefDb && !options.defDbToCsv && !options.downloadAudio;
     if (needsApiKey && !process.env.ANTHROPIC_API_KEY) {
       console.error(chalk.red('錯誤：請設定環境變數 ANTHROPIC_API_KEY，或加上 --mock / --offline / --translate / --translate-force 旗標以不使用 Claude API'));
       process.exit(1);
@@ -421,6 +424,34 @@ program
           return;
         }
 
+        // 發音 MP3 下載：查 word-audio.db → 下載到 WORD_CACHE_PATH/audio/
+        if (options.downloadAudio) {
+          const audioDir = getDefaultAudioDir();
+          console.log('');
+          console.log(chalk.cyan('下載發音 MP3'));
+          console.log(chalk.gray(`  儲存路徑：${audioDir}`));
+          console.log('');
+          const result = await downloadBeginnerAudio(
+            beginnerWordsCsvs,
+            audioDir,
+            (done, total, meta) => {
+              const tag =
+                meta.status === 'downloaded' ? chalk.green('[下載]')  :
+                meta.status === 'skipped'    ? chalk.gray('[跳過]')   :
+                meta.status === 'no-url'     ? chalk.yellow('[無URL]') :
+                                               chalk.red('[失敗]');
+              process.stdout.write(`\r  ${String(Math.round(done / total * 100)).padStart(3)}% (${done}/${total}) ${tag} ${meta.word.padEnd(20)}`);
+            },
+          );
+          process.stdout.write('\n');
+          console.log('');
+          console.log(chalk.green(`完成：下載 ${result.downloaded} 個 | 已存在 ${result.skipped} 個 | 無 URL ${result.noUrl} 個 | 失敗 ${result.errors} 個`));
+          if (result.noUrl > 0) {
+            console.log(chalk.yellow(`提示：無 URL 的詞請先執行 --mw 預查，建立 word-audio.db 後再重跑 --download-audio`));
+          }
+          return;
+        }
+
         // 個人單字庫升級：把 CSV 的 definition_en 升級到 word-dict.json
         if (options.updateDict) {
           const wc = getWordCache();
@@ -714,7 +745,7 @@ program
 
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
-        const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+        const apkgPath = await exportToApkg(csvCards, deckName, options.output, getDefaultAudioDir());
         const htmlPath = exportToHtml(csvCards, deckName, options.output);
         console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
         console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
@@ -742,7 +773,7 @@ program
         const csvCards: GeneratedCards = { vocab: vocabCards, cloze: [], character: [], plot: [] };
         console.log('');
         console.log(chalk.yellow('正在匯出檔案...'));
-        const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+        const apkgPath = await exportToApkg(csvCards, deckName, options.output, getDefaultAudioDir());
         const htmlPath = exportToHtml(csvCards, deckName, options.output);
         console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
         console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));
@@ -766,7 +797,7 @@ program
         process.exit(1);
       }
       console.log(chalk.yellow('正在匯出檔案...'));
-      const apkgPath = await exportToApkg(csvCards, deckName, options.output);
+      const apkgPath = await exportToApkg(csvCards, deckName, options.output, getDefaultAudioDir());
       const htmlPath = exportToHtml(csvCards, deckName, options.output);
       console.log(chalk.green(`✓ Anki 匯入包：${apkgPath}`));
       console.log(chalk.green(`✓ HTML 預覽：  ${htmlPath}`));

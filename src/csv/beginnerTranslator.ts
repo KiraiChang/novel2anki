@@ -6,9 +6,11 @@ import { applyNormalization } from '../nlp/tokenNormalizer';
 import { batchWsd, WsdRequest } from './wsdClient';
 import { getWsdShortdefsDb, hashShortdefs, ShortdefEntry } from '../nlp/wsdShortdefsDb';
 import { getWordDefDb } from '../nlp/wordDefDb';
+import { getWordAudioDb } from '../nlp/wordAudioDb';
 
-const MW_API   = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
-const DICT_API = 'https://api.dictionaryapi.dev/api/v2/entries/en';
+const MW_LEARNERS_API    = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
+const MW_COLLEGIATE_API  = 'https://www.dictionaryapi.com/api/v3/references/collegiate/json';
+const DICT_API           = 'https://api.dictionaryapi.dev/api/v2/entries/en';
 const DEEPL_FREE_LIMIT = 500_000;
 const DEEPL_PRO_PRICE_PER_MILLION = 25;
 const DEEPL_BATCH_SIZE = 50;
@@ -92,15 +94,37 @@ function normalizePOS(pos: string): string | null {
 // ── Merriam-Webster Collegiate API ───────────────────────────────────────────
 
 interface MWEntry {
-  meta?: { id?: string };  // MW entry id，如 "against" / "back:1"（用於過濾非查詢詞的 entry）
-  fl?: string;             // functional label（詞性），如 "noun" / "verb"
-  shortdef?: string[];     // 簡短定義列表
+  meta?: { id?: string };
+  hwi?: { prs?: Array<{ sound?: { audio?: string } }> };
+  fl?: string;
+  shortdef?: string[];
 }
 
 /** MW meta.id 可能帶 ":N" 同形詞後綴，只比較冒號前的部分 */
 function isSameWord(metaId: string | undefined, word: string): boolean {
-  if (!metaId) return true; // 無 id 欄位時保守接受
+  if (!metaId) return true;
   return metaId.toLowerCase().split(':')[0] === word.toLowerCase();
+}
+
+/** MW audio 欄位 → 完整 MP3 URL（https://media.merriam-webster.com/...） */
+function buildMWAudioUrl(audio: string): string {
+  let subdir: string;
+  if (audio.startsWith('bix'))   subdir = 'bix';
+  else if (audio.startsWith('gg')) subdir = 'gg';
+  else if (/^\d/.test(audio))    subdir = 'number';
+  else                           subdir = audio[0];
+  return `https://media.merriam-webster.com/audio/prons/en/us/mp3/${subdir}/${audio}.mp3`;
+}
+
+/** 從 MWEntry 陣列取第一個有效 audio，寫入 word-audio.db（已存在則跳過） */
+function saveAudioFromEntries(word: string, entries: MWEntry[]): void {
+  for (const entry of entries) {
+    const audio = entry.hwi?.prs?.[0]?.sound?.audio;
+    if (audio) {
+      getWordAudioDb().set(word, buildMWAudioUrl(audio));
+      return;
+    }
+  }
 }
 
 // 排除交叉參照類短句（MW shortdef 通常已乾淨，但保留保護）
@@ -110,10 +134,11 @@ const isUsableMW = (def: string) =>
 async function fetchDefinitionFromMW(
   word: string,
   targetPOS: string | null,
+  apiBase: string,
   apiKey: string,
 ): Promise<string | null> {
   const res = await fetch(
-    `${MW_API}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
+    `${apiBase}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
     { signal: AbortSignal.timeout(5000) },
   );
   if (!res.ok) {
@@ -130,6 +155,8 @@ async function fetchDefinitionFromMW(
     isSameWord(e.meta?.id, word),
   );
   if (entries.length === 0) return null;
+
+  saveAudioFromEntries(word, entries);
 
   // 優先找符合 POS 的 entry
   if (targetPOS) {
@@ -154,10 +181,11 @@ async function fetchDefinitionFromMW(
 async function fetchAllShortdefsFromMW(
   word: string,
   targetPOS: string | null,
+  apiBase: string,
   apiKey: string,
 ): Promise<Array<{ fl: string; shortdef: string }> | null> {
   const res = await fetch(
-    `${MW_API}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
+    `${apiBase}/${encodeURIComponent(word)}?key=${encodeURIComponent(apiKey)}`,
     { signal: AbortSignal.timeout(5000) },
   );
   if (!res.ok) return null;
@@ -170,6 +198,8 @@ async function fetchAllShortdefsFromMW(
     isSameWord(e.meta?.id, word),
   );
   if (entries.length === 0) return null;
+
+  saveAudioFromEntries(word, entries);
 
   // POS 匹配的 entry 排前面
   const ordered = targetPOS
@@ -237,12 +267,23 @@ async function fetchEnglishDefinition(
   const hit = getWordCache().get(word, pos);
   if (hit) return { def: hit.def, source: hit.tier === 'dict' ? 'dict' : 'cached' };
 
-  const targetPOS = pos ? normalizePOS(pos) : null;
-  const mwKey = process.env.MW_API_KEY;
+  const targetPOS      = pos ? normalizePOS(pos) : null;
+  const learnersKey    = process.env.MW_API_KEY;
+  const collegiateKey  = process.env.MW_COLLEGIATE_API_KEY;
 
-  if (mwKey) {
+  if (learnersKey) {
     try {
-      const def = await fetchDefinitionFromMW(word, targetPOS, mwKey);
+      const def = await fetchDefinitionFromMW(word, targetPOS, MW_LEARNERS_API, learnersKey);
+      if (def) {
+        getWordCache().setCache(word, pos, def, 'MW');
+        return { def, source: 'MW' };
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  if (collegiateKey) {
+    try {
+      const def = await fetchDefinitionFromMW(word, targetPOS, MW_COLLEGIATE_API, collegiateKey);
       if (def) {
         getWordCache().setCache(word, pos, def, 'MW');
         return { def, source: 'MW' };
@@ -380,7 +421,8 @@ export async function fetchBeginnerWordsMW(
     }
   } else {
     // ── WSD 路徑（兩階段：MW 取全部 shortdefs → 批次推論）────────────────────
-    const mwKey = process.env.MW_API_KEY;
+    const learnersKey   = process.env.MW_API_KEY;
+    const collegiateKey = process.env.MW_COLLEGIATE_API_KEY;
     const wordCache = getWordCache();
 
     // (rowIdx, 候選詞義列表, context sentence)
@@ -417,11 +459,17 @@ export async function fetchBeginnerWordsMW(
       // 先查 SQLite shortdefs 快取（跨書共用，不打 MW API）
       let rawEntries = shortdefsDb.get(lemma);
 
-      // SQLite 未命中且有 MW key：查 MW 並寫入 SQLite
-      if (!rawEntries && mwKey) {
+      // SQLite 未命中：依序查 Learner's → Collegiate，並寫入 SQLite
+      if (!rawEntries && learnersKey) {
         try {
-          // targetPOS=null 取回 MW 原始全部 entry，排序留給 applyPosOrder
-          rawEntries = await fetchAllShortdefsFromMW(lemma, null, mwKey);
+          rawEntries = await fetchAllShortdefsFromMW(lemma, null, MW_LEARNERS_API, learnersKey);
+          if (rawEntries) shortdefsDb.set(lemma, rawEntries);
+        } catch { /* fallthrough */ }
+      }
+
+      if (!rawEntries && collegiateKey) {
+        try {
+          rawEntries = await fetchAllShortdefsFromMW(lemma, null, MW_COLLEGIATE_API, collegiateKey);
           if (rawEntries) shortdefsDb.set(lemma, rawEntries);
         } catch { /* fallthrough */ }
       }

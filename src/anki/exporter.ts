@@ -144,7 +144,8 @@ function insertCard(db: Database.Database, nid: number, ord: number, due: number
 export async function exportToApkg(
   cards: GeneratedCards,
   deckName: string,
-  outputDir: string
+  outputDir: string,
+  audioDir?: string,
 ): Promise<string> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'novel2anki-'));
   const dbPath = path.join(tmpDir, 'collection.anki2');
@@ -152,10 +153,23 @@ export async function exportToApkg(
 
   initSchema(db, deckName);
 
+  // Pre-compute which words have a local MP3 (filename = word.toLowerCase().mp3)
+  const audioFiles = new Map<string, string>(); // word.mp3 → absolute path
+  if (audioDir && fs.existsSync(audioDir)) {
+    for (const card of cards.vocab) {
+      const filename = `${card.word.toLowerCase()}.mp3`;
+      const fullPath = path.join(audioDir, filename);
+      if (fs.existsSync(fullPath)) audioFiles.set(filename, fullPath);
+    }
+  }
+
   let due = 1;
 
   for (const card of cards.vocab) {
-    const front = `<div class="word">${card.word}</div>${card.definition_en ? `<div class="definition-en">${card.definition_en}</div>` : ''}`;
+    const audioTag = audioFiles.has(`${card.word.toLowerCase()}.mp3`)
+      ? `[sound:${card.word.toLowerCase()}.mp3]`
+      : '';
+    const front = `${audioTag}<div class="word">${card.word}</div>${card.definition_en ? `<div class="definition-en">${card.definition_en}</div>` : ''}`;
     const back  = `${card.word_zh ? `<div class="word-zh">${card.word_zh}</div>` : ''}<div class="definition">${card.definition_zh}</div><div class="example">${card.exampleFromText}</div>${card.exampleZh ? `<div class="example">${card.exampleZh}</div>` : ''}`;
     const nid = insertNote(db, MODEL_BASIC_ID, [front, back]);
     insertCard(db, nid, 0, due++);
@@ -186,9 +200,17 @@ export async function exportToApkg(
   fs.mkdirSync(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, `${deckName}.apkg`);
 
+  // Build media map: {"0": "word1.mp3", "1": "word2.mp3", ...}
+  const audioEntries = Array.from(audioFiles.entries()); // [filename, fullPath]
+  const mediaMap: Record<string, string> = {};
+  audioEntries.forEach(([filename], idx) => { mediaMap[String(idx)] = filename; });
+
   const zip = new JSZip();
   zip.file('collection.anki2', fs.readFileSync(dbPath));
-  zip.file('media', '{}');
+  zip.file('media', JSON.stringify(mediaMap));
+  for (let idx = 0; idx < audioEntries.length; idx++) {
+    zip.file(String(idx), fs.readFileSync(audioEntries[idx][1]));
+  }
   const content = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 } });
   fs.writeFileSync(outputPath, content);
 
